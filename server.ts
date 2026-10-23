@@ -33,6 +33,8 @@ app.post("/chat", async (req, res) => {
 
   try {
     let result: string | undefined;
+    let costUsd: number | undefined;
+    let usage: unknown;
     for await (const message of query({
       prompt,
       options: {
@@ -42,12 +44,14 @@ app.post("/chat", async (req, res) => {
     })) {
       if (message.type === "result" && message.subtype === "success") {
         result = message.result;
+        costUsd = message.total_cost_usd;
+        usage = message.usage;
       }
     }
     if (result === undefined) {
       return res.status(502).json({ error: "Agent did not complete successfully." });
     }
-    res.json({ result });
+    res.json({ result, costUsd, usage });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Internal error running agent." });
