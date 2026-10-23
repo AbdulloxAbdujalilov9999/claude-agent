@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>Mina</title>
+    <meta name="theme-color" content="#f7f5f0" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#151412" media="(prefers-color-scheme: dark)" />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Newsreader:opsz,wght@6..72,400;6..72,500&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/app.css" />
+    <script src="/vendor/marked.js" defer></script>
+    <script src="/vendor/purify.js" defer></script>
+    <script src="/app.js" defer></script>
+  </head>
+  <body>
+    <!-- Sign-in -->
+    <main id="login" class="login" hidden>
+      <form id="login-form" class="login-card">
+        <div class="orb orb-lg" aria-hidden="true"></div>
+        <h1>Welcome back</h1>
+        <p class="muted">Mina is private. Enter your password to continue.</p>
+        <label class="sr-only" for="password">Password</label>
+        <input id="password" type="password" autocomplete="current-password" placeholder="Password" required />
+        <button type="submit" class="btn btn-primary">Sign in</button>
+        <p id="login-error" class="form-error" role="alert"></p>
+      </form>
+    </main>
+
+    <!-- App -->
+    <div id="app" class="app" hidden>
+      <aside id="sidebar" class="sidebar" aria-label="Conversations">
+        <div class="sidebar-top">
+          <div class="brand">
+            <div class="orb" aria-hidden="true"></div>
+            <span>Mina</span>
+          </div>
+          <button id="close-sidebar" class="icon-btn mobile-only" aria-label="Close menu">
+            <svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18" /></svg>
+          </button>
+        </div>
+        <button id="new-chat" class="new-chat">
+          <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" /></svg>
+          New conversation
+        </button>
+        <nav id="session-list" class="session-list"></nav>
+        <div class="sidebar-bottom">
+          <button id="theme-toggle" class="sidebar-link" aria-label="Change theme">
+            <svg viewBox="0 0 24 24"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z" /></svg>
+            <span id="theme-label">Theme: system</span>
+          </button>
+          <button id="logout" class="sidebar-link">
+            <svg viewBox="0 0 24 24"><path d="M15 17l5-5-5-5M20 12H9M12 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h7" /></svg>
+            Sign out
+          </button>
+        </div>
+      </aside>
+      <div id="scrim" class="scrim" hidden></div>
+
+      <section class="main">
+        <header class="topbar">
+          <button id="open-sidebar" class="icon-btn mobile-only" aria-label="Open menu">
+            <svg viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16" /></svg>
+          </button>
+          <h2 id="chat-title" class="chat-title">New conversation</h2>
+          <span id="status-pill" class="status-pill" hidden></span>
+        </header>
+
+        <div id="scroller" class="scroller">
+          <div id="empty" class="empty">
+            <div class="orb orb-xl" aria-hidden="true"></div>
+            <h1 id="greeting" class="greeting">Good day, Abdulloh</h1>
+            <p class="muted">What are we moving forward today?</p>
+            <div class="suggestions">
+              <button class="suggestion" data-prompt="Where are we? Give me the standing summary: what's in motion, what's blocked, and what needs my decision.">
+                <strong>Where are we?</strong><span>Standing summary of everything in motion</span>
+              </button>
+              <button class="suggestion" data-prompt="Help me plan this week. Ask me what's on my plate, then turn it into a prioritized plan.">
+                <strong>Plan my week</strong><span>Turn what's on my plate into priorities</span>
+              </button>
+              <button class="suggestion" data-prompt="I want to research a market before making a decision. Ask me what the decision is, then propose a research plan.">
+                <strong>Research a decision</strong><span>Compare options before I commit</span>
+              </button>
+              <button class="suggestion" data-prompt="Draft an email for me. Ask who it's to and what it needs to say, then write it in my voice. Don't send anything.">
+                <strong>Draft an email</strong><span>In my voice, for my review</span>
+              </button>
+            </div>
+          </div>
+          <div id="messages" class="messages" aria-live="polite"></div>
+        </div>
+
+        <footer class="composer-wrap">
+          <form id="composer" class="composer">
+            <label class="sr-only" for="input">Message Mina</label>
+            <textarea id="input" rows="1" placeholder="Message Mina…" autocomplete="off"></textarea>
+            <div class="composer-actions">
+              <span class="hint">Enter to send · Shift+Enter for a new line</span>
+              <button id="stop" type="button" class="send stop" aria-label="Stop Mina" hidden>
+                <svg viewBox="0 0 24 24"><rect x="7" y="7" width="10" height="10" rx="2" /></svg>
+              </button>
+              <button id="send" type="submit" class="send" aria-label="Send" disabled>
+                <svg viewBox="0 0 24 24"><path d="M12 19V5M5 12l7-7 7 7" /></svg>
+              </button>
+            </div>
+          </form>
+          <p class="footnote">Mina asks before she sends, spends, publishes, or deletes anything.</p>
+        </footer>
+      </section>
+    </div>
+
+    <div id="toast" class="toast" role="status" hidden></div>
+  </body>
+</html>

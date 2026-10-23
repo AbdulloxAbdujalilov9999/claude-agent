@@ -1,9 +1,27 @@
 import "dotenv/config";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import express from "express";
-import cors from "cors";
+import type { Response } from "express";
+import Anthropic from "@anthropic-ai/sdk";
 import { query, tool, createSdkMcpServer } from "@anthropic-ai/claude-agent-sdk";
 import { z } from "zod";
-import { chatWithMina, MinaConfigError } from "./mina.js";
+import {
+  archiveSession,
+  chatWithMina,
+  confirmTool,
+  createSession,
+  getHistory,
+  interrupt,
+  listSessions,
+  MinaConfigError,
+  renameSession,
+  runTurn,
+  type UiEvent,
+} from "./mina.js";
+import { isSignedIn, login, logout, requireAuth } from "./auth.js";
+
+const here = path.dirname(fileURLToPath(import.meta.url));
 
 const add = tool(
   "add",
@@ -21,11 +39,147 @@ const toolsServer = createSdkMcpServer({
 });
 
 const app = express();
-app.use(cors());
-app.use(express.json());
+// Render (and most hosts) terminate TLS at a proxy; trust it so req.secure and req.ip are right.
+app.set("trust proxy", 1);
+app.use(express.json({ limit: "1mb" }));
+app.use(express.static(path.join(here, "public")));
+app.get("/vendor/marked.js", (_req, res) => res.sendFile(path.join(here, "node_modules/marked/lib/marked.umd.js")));
+app.get("/vendor/purify.js", (_req, res) => res.sendFile(path.join(here, "node_modules/dompurify/dist/purify.min.js")));
 
 app.get("/health", (_req, res) => {
   res.json({ status: "ok" });
+});
+
+app.get("/api/me", (req, res) => {
+  res.json({ signedIn: isSignedIn(req), configured: Boolean(process.env.MINA_PASSWORD) });
+});
+app.post("/api/login", login);
+app.post("/api/logout", logout);
+
+// Everything below costs money or touches Mina's data, so it needs the password.
+app.use(["/api", "/mina", "/chat"], requireAuth);
+
+function sendError(res: Response, err: unknown, fallback: string) {
+  console.error(err);
+  if (res.headersSent) return;
+  if (err instanceof MinaConfigError) {
+    return res.status(500).json({ error: "Mina isn't configured on the server yet (missing agent/environment id)." });
+  }
+  if (err instanceof Anthropic.NotFoundError) return res.status(404).json({ error: "That conversation doesn't exist." });
+  if (err instanceof Anthropic.AuthenticationError) {
+    return res.status(500).json({ error: "The server's Anthropic API key was rejected." });
+  }
+  if (err instanceof Anthropic.RateLimitError) return res.status(429).json({ error: "Rate limited. Try again in a moment." });
+  res.status(500).json({ error: fallback });
+}
+
+app.get("/api/sessions", async (_req, res) => {
+  try {
+    res.json({ sessions: await listSessions() });
+  } catch (err) {
+    sendError(res, err, "Couldn't load conversations.");
+  }
+});
+
+app.post("/api/sessions", async (req, res) => {
+  const title = typeof req.body?.title === "string" ? req.body.title.slice(0, 120) : undefined;
+  try {
+    res.json({ session: await createSession(title) });
+  } catch (err) {
+    sendError(res, err, "Couldn't start a conversation.");
+  }
+});
+
+app.get("/api/sessions/:id", async (req, res) => {
+  try {
+    res.json(await getHistory(req.params.id));
+  } catch (err) {
+    sendError(res, err, "Couldn't load that conversation.");
+  }
+});
+
+app.patch("/api/sessions/:id", async (req, res) => {
+  const title = req.body?.title;
+  if (typeof title !== "string" || title.trim() === "") {
+    return res.status(400).json({ error: "Body must include a non-empty 'title' string." });
+  }
+  try {
+    res.json({ session: await renameSession(req.params.id, title.trim().slice(0, 120)) });
+  } catch (err) {
+    sendError(res, err, "Couldn't rename that conversation.");
+  }
+});
+
+app.post("/api/sessions/:id/archive", async (req, res) => {
+  try {
+    await archiveSession(req.params.id);
+    res.json({ ok: true });
+  } catch (err) {
+    sendError(res, err, "Couldn't archive that conversation. If Mina is still working, stop her first.");
+  }
+});
+
+// Streams one turn as Server-Sent Events. With a message, sends it first; without one,
+// re-attaches to a turn already in progress (for example after approving from a reloaded page).
+async function streamTurn(req: express.Request, res: Response, message?: string) {
+  res.writeHead(200, {
+    "Content-Type": "text/event-stream",
+    "Cache-Control": "no-cache, no-transform",
+    Connection: "keep-alive",
+    "X-Accel-Buffering": "no",
+  });
+  res.flushHeaders();
+  const write = (event: UiEvent) => res.write(`data: ${JSON.stringify(event)}\n\n`);
+  const heartbeat = setInterval(() => res.write(": keep-alive\n\n"), 15000);
+  const abort = new AbortController();
+  res.on("close", () => abort.abort());
+
+  try {
+    await runTurn(req.params.id as string, write, { message, signal: abort.signal });
+  } catch (err) {
+    if (!abort.signal.aborted) {
+      console.error(err);
+      write({ t: "error", message: err instanceof MinaConfigError ? err.message : "Lost the connection to Mina." });
+      write({ t: "done", reason: "error" });
+    }
+  } finally {
+    clearInterval(heartbeat);
+    res.end();
+  }
+}
+
+app.post("/api/sessions/:id/messages", async (req, res) => {
+  const text = req.body?.text;
+  if (typeof text !== "string" || text.trim() === "") {
+    return res.status(400).json({ error: "Body must include a non-empty 'text' string." });
+  }
+  await streamTurn(req, res, text);
+});
+
+app.get("/api/sessions/:id/stream", async (req, res) => {
+  await streamTurn(req, res);
+});
+
+app.post("/api/sessions/:id/confirm", async (req, res) => {
+  const { toolUseId, result, denyMessage } = req.body ?? {};
+  if (typeof toolUseId !== "string" || (result !== "allow" && result !== "deny")) {
+    return res.status(400).json({ error: "Body must include 'toolUseId' and 'result' ('allow' or 'deny')." });
+  }
+  try {
+    await confirmTool(req.params.id, toolUseId, result, typeof denyMessage === "string" ? denyMessage : undefined);
+    res.json({ ok: true });
+  } catch (err) {
+    sendError(res, err, "Couldn't send your decision to Mina.");
+  }
+});
+
+app.post("/api/sessions/:id/interrupt", async (req, res) => {
+  try {
+    await interrupt(req.params.id);
+    res.json({ ok: true });
+  } catch (err) {
+    sendError(res, err, "Couldn't stop Mina.");
+  }
 });
 
 app.post("/mina/chat", async (req, res) => {
@@ -38,12 +192,7 @@ app.post("/mina/chat", async (req, res) => {
     const result = await chatWithMina(message, typeof sessionId === "string" ? sessionId : undefined);
     res.json(result);
   } catch (err) {
-    if (err instanceof MinaConfigError) {
-      console.error(err);
-      return res.status(500).json({ error: "Mina isn't configured on the server yet (missing agent/environment id)." });
-    }
-    console.error(err);
-    res.status(500).json({ error: "Internal error talking to Mina." });
+    sendError(res, err, "Internal error talking to Mina.");
   }
 });
 
@@ -82,5 +231,5 @@ app.post("/chat", async (req, res) => {
 
 const port = Number(process.env.PORT) || 3000;
 app.listen(port, () => {
-  console.log(`Agent server listening on port ${port}`);
+  console.log(`Mina is listening on http://localhost:${port}`);
 });
