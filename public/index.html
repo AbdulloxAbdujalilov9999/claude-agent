@@ -1,12 +1,17 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme="dark">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <title>Mina</title>
-    <meta name="theme-color" content="#f7f5f0" media="(prefers-color-scheme: light)" />
-    <meta name="theme-color" content="#151412" media="(prefers-color-scheme: dark)" />
+    <meta name="theme-color" content="#f3f6fc" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#0b1530" media="(prefers-color-scheme: dark)" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="Mina" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <link rel="manifest" href="/manifest.webmanifest" />
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
@@ -50,9 +55,21 @@
         </button>
         <nav id="session-list" class="session-list"></nav>
         <div class="sidebar-bottom">
+          <button id="install" class="sidebar-link install" hidden>
+            <svg viewBox="0 0 24 24"><path d="M12 3v12M7 10l5 5 5-5M5 21h14" /></svg>
+            Install Mina app
+          </button>
+          <button id="wake-toggle" class="sidebar-link toggle" aria-label="Toggle Hey Mina wake word">
+            <svg viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3" /><path d="M5 11a7 7 0 0 0 14 0M12 18v3" /></svg>
+            <span id="wake-label">“Hey Mina”: off</span>
+          </button>
+          <button id="notify-toggle" class="sidebar-link toggle" aria-label="Toggle notifications">
+            <svg viewBox="0 0 24 24"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9M10.3 21a1.94 1.94 0 0 0 3.4 0" /></svg>
+            <span id="notify-label">Notifications: off</span>
+          </button>
           <button id="theme-toggle" class="sidebar-link" aria-label="Change theme">
             <svg viewBox="0 0 24 24"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z" /></svg>
-            <span id="theme-label">Theme: system</span>
+            <span id="theme-label">Theme: dark</span>
           </button>
           <button id="logout" class="sidebar-link">
             <svg viewBox="0 0 24 24"><path d="M15 17l5-5-5-5M20 12H9M12 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h7" /></svg>
@@ -100,6 +117,9 @@
             <textarea id="input" rows="1" placeholder="Message Mina…" autocomplete="off"></textarea>
             <div class="composer-actions">
               <span class="hint">Enter to send · Shift+Enter for a new line</span>
+              <button id="mic" type="button" class="icon-btn mic" aria-label="Speak to Mina" hidden>
+                <svg viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3" /><path d="M5 11a7 7 0 0 0 14 0M12 18v3" /></svg>
+              </button>
               <button id="stop" type="button" class="send stop" aria-label="Stop Mina" hidden>
                 <svg viewBox="0 0 24 24"><rect x="7" y="7" width="10" height="10" rx="2" /></svg>
               </button>
@@ -111,6 +131,14 @@
           <p class="footnote">Mina asks before she sends, spends, publishes, or deletes anything.</p>
         </footer>
       </section>
+    </div>
+
+    <div id="voice-overlay" class="voice-overlay" hidden>
+      <div class="voice-card">
+        <div class="orb orb-xl listening" aria-hidden="true"></div>
+        <p id="voice-text" class="voice-text" aria-live="polite">Listening…</p>
+        <button id="voice-cancel" class="btn">Cancel</button>
+      </div>
     </div>
 
     <div id="toast" class="toast" role="status" hidden></div>

@@ -55,7 +55,7 @@ function renderMarkdown(text) {
 }
 
 // ---------- theme ----------
-const THEMES = ["system", "light", "dark"];
+const THEMES = ["dark", "light", "system"];
 function applyTheme(theme) {
   if (theme === "system") delete document.documentElement.dataset.theme;
   else document.documentElement.dataset.theme = theme;
@@ -63,9 +63,9 @@ function applyTheme(theme) {
 }
 function currentTheme() {
   try {
-    return localStorage.getItem("mina-theme") || "system";
+    return localStorage.getItem("mina-theme") || "dark";
   } catch {
-    return "system";
+    return "dark";
   }
 }
 $("#theme-toggle").addEventListener("click", () => {
@@ -142,7 +142,13 @@ function renderSessions() {
     }
     const item = el("button", "session" + (s.id === state.currentId ? " active" : ""));
     item.dataset.id = s.id;
-    if (s.status === "running") item.append(el("span", "dot"));
+    const badge = STATE_BADGES[s.state];
+    if (badge) {
+      const dot = el("span", `state-dot ${s.state}`);
+      dot.title = badge;
+      dot.setAttribute("aria-label", badge);
+      item.append(dot);
+    }
     item.append(el("span", "name", s.title));
     const more = el("span", "more");
     more.setAttribute("role", "button");
@@ -158,16 +164,36 @@ function renderSessions() {
     list.append(item);
   }
   if (!state.sessions.length) list.append(el("div", "group-label", "No conversations yet"));
+  updateBadge();
 }
 
-async function loadSessions() {
+const STATE_BADGES = { working: "Mina is working", waiting: "Waiting for your input", done: "Done" };
+
+async function loadSessions({ quiet = false } = {}) {
   try {
     const { sessions } = await api("/api/sessions");
+    const before = new Map(state.sessions.map((s) => [s.id, s.state]));
     state.sessions = sessions;
     renderSessions();
+    // Tell Abdulloh when a conversation he isn't looking at moves on by itself.
+    for (const s of sessions) {
+      const was = before.get(s.id);
+      if (was && was !== s.state && !(s.id === state.currentId && state.busy)) announce(s);
+    }
   } catch (err) {
-    toast(err.message);
+    if (!quiet) toast(err.message);
   }
+}
+
+// Keep the sidebar honest: poll quickly while anything is working, slowly otherwise.
+let pollTimer;
+function schedulePoll() {
+  clearTimeout(pollTimer);
+  const busy = state.sessions.some((s) => s.state === "working");
+  pollTimer = setTimeout(async () => {
+    if (!$("#app").hidden) await loadSessions({ quiet: true });
+    schedulePoll();
+  }, busy ? 6000 : 30000);
 }
 
 let openMenuNode = null;
@@ -291,7 +317,7 @@ async function openSession(id) {
     finishTurn();
     scrollToBottom(true);
     // Re-attach if Mina is still working, or if she's paused on a decision we haven't made.
-    if (session.status === "running" || session.status === "rescheduling") {
+    if (session.state === "working") {
       followStream();
     } else if (state.pending.size) {
       setStatus("waiting");
@@ -616,7 +642,8 @@ async function runStream(url, init) {
   state.busy = true;
   updateComposer();
   setStatus("running");
-  markSessionStatus(sessionId, "running");
+  markSessionState(sessionId, "working");
+  let ended = null;
   try {
     const res = await fetch(url, { ...init, signal: abort.signal });
     if (res.status === 401) return showLogin();
@@ -625,6 +652,15 @@ async function runStream(url, init) {
       throw new Error(data.error || `Request failed (${res.status})`);
     }
     await readStream(res, (event) => {
+      if (event.t === "status" && event.status === "waiting") {
+        markSessionState(sessionId, "waiting");
+        announce(sessionById(sessionId), "waiting");
+        if (voice.speakNext) speak("I need your OK before the next step. It's on screen.");
+      } else if (event.t === "status" && event.status === "running") {
+        markSessionState(sessionId, "working");
+      } else if (event.t === "done") {
+        ended = event.reason === "terminated" ? "ended" : "done";
+      }
       if (state.currentId === sessionId) apply(event);
     });
   } catch (err) {
@@ -641,7 +677,15 @@ async function runStream(url, init) {
         updateComposer();
       }
     }
-    markSessionStatus(sessionId, "idle");
+    if (ended) {
+      markSessionState(sessionId, ended);
+      announce(sessionById(sessionId), ended, lastReplyText());
+      if (voice.speakNext && state.currentId === sessionId) speak(lastReplyText());
+      voice.speakNext = false;
+    } else {
+      loadSessions({ quiet: true });
+    }
+    schedulePoll();
   }
 }
 
@@ -649,13 +693,22 @@ function followStream() {
   return runStream(`/api/sessions/${state.currentId}/stream`, { method: "GET" });
 }
 
-function markSessionStatus(id, status) {
-  const s = state.sessions.find((x) => x.id === id);
-  if (s) {
-    s.status = status;
+function sessionById(id) {
+  return state.sessions.find((x) => x.id === id);
+}
+
+function markSessionState(id, next) {
+  const s = sessionById(id);
+  if (s && s.state !== next) {
+    s.state = next;
     s.updatedAt = new Date().toISOString();
+    renderSessions();
   }
-  renderSessions();
+}
+
+function lastReplyText() {
+  const blocks = [...state.blocks.values()];
+  return blocks.length ? blocks[blocks.length - 1].text : "";
 }
 
 async function send(text) {
@@ -729,6 +782,340 @@ for (const button of document.querySelectorAll(".suggestion")) {
   button.addEventListener("click", () => send(button.dataset.prompt));
 }
 
+// ---------- notifications, app install, badge ----------
+function notificationsOn() {
+  return "Notification" in window && Notification.permission === "granted" && pref("mina-notify", "on") === "on";
+}
+
+function pref(key, fallback) {
+  try {
+    return localStorage.getItem(key) ?? fallback;
+  } catch {
+    return fallback;
+  }
+}
+function setPref(key, value) {
+  try {
+    localStorage.setItem(key, value);
+  } catch {}
+}
+
+const ANNOUNCE = {
+  waiting: "Mina needs your decision",
+  done: "Mina is done",
+  ended: "Mina stopped",
+};
+
+async function announce(session, kind = session?.state, text = "") {
+  updateBadge();
+  if (!session || !ANNOUNCE[kind] || !notificationsOn()) return;
+  if (!document.hidden && session.id === state.currentId) return;
+  const body = (text ? plainText(text) : session.title).slice(0, 180);
+  const options = { body, tag: `${session.id}:${kind}`, icon: "/icons/icon-192.png", badge: "/icons/badge.png", data: { sessionId: session.id } };
+  try {
+    const reg = await navigator.serviceWorker?.ready;
+    if (reg) await reg.showNotification(ANNOUNCE[kind], options);
+    else new Notification(ANNOUNCE[kind], options);
+  } catch {}
+}
+
+function updateBadge() {
+  const waiting = state.sessions.filter((s) => s.state === "waiting").length;
+  document.title = waiting ? `(${waiting}) Mina` : "Mina";
+  try {
+    if (waiting) navigator.setAppBadge?.(waiting);
+    else navigator.clearAppBadge?.();
+  } catch {}
+}
+
+function renderToggles() {
+  const notify = $("#notify-toggle");
+  if (!("Notification" in window)) notify.hidden = true;
+  else $("#notify-label").textContent = `Notifications: ${notificationsOn() ? "on" : "off"}`;
+  const wake = $("#wake-toggle");
+  wake.hidden = !Recognition;
+  $("#wake-label").textContent = `“Hey Mina”: ${voice.wakeEnabled ? "on" : "off"}`;
+  wake.classList.toggle("on", voice.wakeEnabled);
+  notify.classList.toggle("on", notificationsOn());
+}
+
+let installPrompt = null;
+window.addEventListener("beforeinstallprompt", (e) => {
+  e.preventDefault();
+  installPrompt = e;
+  $("#install").hidden = false;
+});
+window.addEventListener("appinstalled", () => {
+  installPrompt = null;
+  $("#install").hidden = true;
+  toast("Mina is installed. Open her from your Dock or home screen.");
+});
+
+function setupExtras() {
+  if (setupExtras.done) return;
+  setupExtras.done = true;
+  if ("serviceWorker" in navigator) {
+    navigator.serviceWorker.register("/sw.js").catch(() => {});
+    navigator.serviceWorker.addEventListener("message", (e) => {
+      if (e.data?.open) openSession(e.data.open);
+    });
+  }
+  $("#install").addEventListener("click", async () => {
+    if (!installPrompt) return;
+    installPrompt.prompt();
+    await installPrompt.userChoice.catch(() => {});
+    installPrompt = null;
+    $("#install").hidden = true;
+  });
+  $("#notify-toggle").addEventListener("click", async () => {
+    if (notificationsOn()) {
+      setPref("mina-notify", "off");
+    } else {
+      const result = Notification.permission === "default" ? await Notification.requestPermission() : Notification.permission;
+      if (result === "granted") {
+        setPref("mina-notify", "on");
+        toast("Notifications on. Mina will ping you when she's done or needs you.");
+      } else {
+        toast("Notifications are blocked for this site. Allow them in your browser's site settings.");
+      }
+    }
+    renderToggles();
+  });
+  $("#wake-toggle").addEventListener("click", () => setWake(!voice.wakeEnabled));
+  $("#mic").addEventListener("click", () => (voice.mode === "dictate" ? stopDictation() : startDictation()));
+  $("#mic").hidden = !Recognition;
+  $("#voice-cancel").addEventListener("click", () => {
+    if (voice.mode === "dictate") return stopDictation(false);
+    clearTimeout(voice.commandTimer);
+    voice.mode = voice.wakeEnabled ? "wake" : "off";
+    showListening(false);
+  });
+  renderToggles();
+  updateBadge();
+  const deepLink = new URLSearchParams(location.search).get("s");
+  if (deepLink) {
+    history.replaceState(null, "", "/");
+    openSession(deepLink);
+  }
+  if (voice.wakeEnabled) setWake(true, { quiet: true });
+}
+
+// ---------- voice: dictation, "Hey Mina", spoken replies ----------
+const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+const WAKE = /\b(?:hey|hi|okay|ok|hello)[\s,.!]*(?:mina|meena|mena|nina|mena|minah|mino)\b[\s,.!?]*/i;
+
+const voice = {
+  rec: null,
+  mode: "off", // off | wake | command | dictate
+  wakeEnabled: pref("mina-wake", "off") === "on",
+  speakNext: false, // read the reply to this turn aloud
+  commandTimer: null,
+  restartTimer: null,
+};
+
+function chime(up = true) {
+  try {
+    const ctx = (chime.ctx ||= new AudioContext());
+    const t = ctx.currentTime;
+    for (const [i, f] of (up ? [660, 990] : [990, 660]).entries()) {
+      const o = ctx.createOscillator();
+      const g = ctx.createGain();
+      o.frequency.value = f;
+      g.gain.setValueAtTime(0.0001, t + i * 0.09);
+      g.gain.exponentialRampToValueAtTime(0.12, t + i * 0.09 + 0.02);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + i * 0.09 + 0.18);
+      o.connect(g).connect(ctx.destination);
+      o.start(t + i * 0.09);
+      o.stop(t + i * 0.09 + 0.2);
+    }
+  } catch {}
+}
+
+function showListening(show, text = "") {
+  $("#voice-overlay").hidden = !show;
+  $("#voice-text").textContent = text || "Listening…";
+  $("#mic").classList.toggle("live", show && voice.mode === "dictate");
+}
+
+function stopRecognition() {
+  clearTimeout(voice.restartTimer);
+  const rec = voice.rec;
+  voice.rec = null;
+  if (rec) {
+    rec.onend = null;
+    try {
+      rec.abort();
+    } catch {}
+  }
+}
+
+function startRecognition({ continuous }) {
+  stopRecognition();
+  const rec = new Recognition();
+  rec.lang = navigator.language || "en-US";
+  rec.continuous = continuous;
+  rec.interimResults = true;
+  rec.onresult = onSpeech;
+  rec.onerror = (e) => {
+    if (e.error === "not-allowed" || e.error === "service-not-allowed") {
+      toast("Mina can't use the microphone. Allow it in your browser's site settings.");
+      voice.wakeEnabled = false;
+      setPref("mina-wake", "off");
+      voice.mode = "off";
+      renderToggles();
+      showListening(false);
+    }
+  };
+  rec.onend = () => {
+    if (voice.rec !== rec) return;
+    voice.rec = null;
+    if (voice.mode === "dictate") {
+      voice.mode = "off";
+      showListening(false);
+    }
+    // Browsers end recognition every so often; keep the wake word alive.
+    if (voice.wakeEnabled && !speechSynthesis.speaking) {
+      if (voice.mode === "off") voice.mode = "wake";
+      voice.restartTimer = setTimeout(() => voice.wakeEnabled && !voice.rec && startRecognition({ continuous: true }), 400);
+    }
+  };
+  try {
+    rec.start();
+    voice.rec = rec;
+  } catch {}
+}
+
+function onSpeech(e) {
+  let interim = "";
+  let final = "";
+  for (let i = e.resultIndex; i < e.results.length; i++) {
+    const r = e.results[i];
+    if (r.isFinal) final += r[0].transcript;
+    else interim += r[0].transcript;
+  }
+  const heard = (final || interim).trim();
+  if (!heard) return;
+
+  if (voice.mode === "wake") {
+    const match = heard.match(WAKE);
+    if (!match) return;
+    voice.mode = "command";
+    chime(true);
+    const rest = heard.slice(match.index + match[0].length).trim();
+    showListening(true, rest || "Yes, Abdulloh?");
+    armCommandTimeout();
+    if (final && rest) finishCommand(rest);
+    return;
+  }
+
+  if (voice.mode === "command") {
+    const text = heard.replace(WAKE, "").trim();
+    if (!text) return;
+    showListening(true, text);
+    armCommandTimeout();
+    if (final) finishCommand(text);
+    return;
+  }
+
+  if (voice.mode === "dictate") {
+    input.value = (voice.dictateBase + " " + heard).trim();
+    autosize();
+    updateComposer();
+    showListening(true, heard);
+    if (final) {
+      stopDictation(true);
+    }
+  }
+}
+
+function armCommandTimeout() {
+  clearTimeout(voice.commandTimer);
+  voice.commandTimer = setTimeout(() => {
+    if (voice.mode !== "command") return;
+    voice.mode = "wake";
+    showListening(false);
+    chime(false);
+  }, 8000);
+}
+
+function finishCommand(text) {
+  clearTimeout(voice.commandTimer);
+  voice.mode = "wake";
+  showListening(false);
+  if (state.busy) return toast("Mina is still working on the last thing. Try again when she's done.");
+  voice.speakNext = true;
+  send(text);
+}
+
+function startDictation() {
+  if (!Recognition) return;
+  speechSynthesis.cancel();
+  voice.mode = "dictate";
+  voice.dictateBase = input.value.trim();
+  showListening(true);
+  startRecognition({ continuous: false });
+}
+
+function stopDictation(submit = false) {
+  voice.mode = voice.wakeEnabled ? "wake" : "off";
+  showListening(false);
+  if (submit && input.value.trim() && !state.busy) {
+    voice.speakNext = true;
+    $("#composer").requestSubmit();
+  }
+  if (voice.wakeEnabled) startRecognition({ continuous: true });
+  else stopRecognition();
+}
+
+function setWake(on, { quiet = false } = {}) {
+  if (!Recognition) return toast("This browser can't listen for “Hey Mina”. Use Chrome.");
+  voice.wakeEnabled = on;
+  setPref("mina-wake", on ? "on" : "off");
+  renderToggles();
+  if (on) {
+    voice.mode = "wake";
+    startRecognition({ continuous: true });
+    if (!quiet) toast("Listening for “Hey Mina” while Mina is open.");
+  } else {
+    voice.mode = "off";
+    stopRecognition();
+    showListening(false);
+  }
+}
+
+function plainText(markdown) {
+  return markdown
+    .replace(/```[\s\S]*?```/g, " (code) ")
+    .replace(/`([^`]+)`/g, "$1")
+    .replace(/!\[[^\]]*\]\([^)]*\)/g, "")
+    .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1")
+    .replace(/^[#>\-*+\s]+/gm, "")
+    .replace(/[*_~|]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function speak(markdown) {
+  const text = plainText(markdown).slice(0, 900);
+  if (!text || !("speechSynthesis" in window)) return;
+  stopRecognition(); // don't let Mina hear herself
+  const u = new SpeechSynthesisUtterance(text);
+  u.lang = navigator.language || "en-US";
+  const voices = speechSynthesis.getVoices();
+  u.voice =
+    voices.find((v) => /samantha|ava|serena|google uk english female|zira|aria/i.test(v.name)) ||
+    voices.find((v) => v.lang.startsWith(u.lang.slice(0, 2))) ||
+    null;
+  u.rate = 1.03;
+  u.onend = u.onerror = () => {
+    if (voice.wakeEnabled && !voice.rec) {
+      voice.mode = "wake";
+      startRecognition({ continuous: true });
+    }
+  };
+  speechSynthesis.speak(u);
+}
+
 // ---------- boot ----------
 function greet() {
   const h = new Date().getHours();
@@ -749,6 +1136,8 @@ async function boot() {
   greet();
   updateComposer();
   await loadSessions();
+  schedulePoll();
+  setupExtras();
   input.focus();
 }
 

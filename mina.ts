@@ -36,10 +36,14 @@ export type UiEvent =
   | { t: "status"; status: "running" | "idle" | "waiting" }
   | { t: "done"; reason: string };
 
+// What the sidebar shows: working (glitch dot), waiting on Abdulloh (orange), done (blue).
+export type SessionState = "new" | "working" | "waiting" | "done" | "ended";
+
 export interface SessionSummary {
   id: string;
   title: string;
   status: string;
+  state: SessionState;
   createdAt: string;
   updatedAt: string;
 }
@@ -112,11 +116,29 @@ export function toUiEvent(event: SessionEvent | StreamEvent): UiEvent | null {
   }
 }
 
+function stateOf(s: Anthropic.Beta.Sessions.BetaManagedAgentsSession): SessionState {
+  if (s.status === "running" || s.status === "rescheduling") return "working";
+  if (s.status === "terminated") return "ended";
+  const saved = s.metadata?.mina_state;
+  return saved === "waiting" || saved === "done" ? saved : "new";
+}
+
+// The API doesn't say whether an idle session is paused on an approval, so runTurn
+// records it in the session's metadata, where every device can read it.
+async function saveState(sessionId: string, state: "waiting" | "done"): Promise<void> {
+  try {
+    await client.beta.sessions.update(sessionId, { metadata: { mina_state: state } });
+  } catch (err) {
+    console.error("Couldn't save session state", err);
+  }
+}
+
 function toSummary(s: Anthropic.Beta.Sessions.BetaManagedAgentsSession): SessionSummary {
   return {
     id: s.id,
     title: s.title || "New conversation",
     status: s.status,
+    state: stateOf(s),
     createdAt: s.created_at,
     updatedAt: s.updated_at,
   };
@@ -230,7 +252,10 @@ export async function runTurn(
     } else if (event.type === "session.status_terminated") {
       emit({ t: "done", reason: "terminated" });
       return;
-    } else if (event.type === "session.status_idle" && event.stop_reason.type !== "requires_action") {
+    } else if (event.type === "session.status_idle" && event.stop_reason.type === "requires_action") {
+      await saveState(sessionId, "waiting");
+    } else if (event.type === "session.status_idle") {
+      await saveState(sessionId, "done");
       emit({ t: "done", reason: event.stop_reason.type });
       return;
     }

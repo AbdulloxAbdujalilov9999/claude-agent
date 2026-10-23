@@ -55,3 +55,10 @@ The old JSON endpoint `POST /mina/chat` still works, behind the same login. It h
 3. Open the service URL and sign in.
 
 The free plan sleeps when idle. Mina will still work, but the first page load after a pause is slow. Check Render's current pricing before moving to an always-on plan.
+
+## Mina on your devices
+
+- **Install as an app.** In Chrome on a Mac or Android, click **Install Mina app** in the sidebar (or the install icon in the address bar). She then opens in her own window and shows up in the Dock or home screen.
+- **Notifications.** Turn them on in the sidebar. Mina pings you when a conversation finishes or needs your decision, as long as the app is open (even in the background).
+- **Status dots.** Blue: done. Orange: waiting for you. Glitching dot: working.
+- **Voice.** Tap the mic to dictate. Turn on **“Hey Mina”** in the sidebar and she listens for her name while the app is open, then reads her reply aloud. This uses Chrome's built-in speech recognition.
