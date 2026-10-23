@@ -34,6 +34,7 @@ npm run dev            # http://localhost:3000
 | Variable | What it is |
 | --- | --- |
 | `ANTHROPIC_API_KEY` | Your Anthropic API key |
+| `ANTHROPIC_WORKSPACE_ID` | Optional. Required only for user-scoped keys (`sk-ant-usr-...`): the `wrkspc_...` id of the workspace |
 | `MINA_AGENT_ID` | The Mina agent's id (`agent_...`) |
 | `MINA_ENVIRONMENT_ID` | The environment her sessions run in (`env_...`) |
 | `MINA_PASSWORD` | Password for the web app. Until it is set, the app stays locked. |

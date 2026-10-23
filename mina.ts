@@ -1,6 +1,10 @@
 import Anthropic from "@anthropic-ai/sdk";
 
-const client = new Anthropic();
+// User-scoped keys (sk-ant-usr-...) must name a workspace on every request.
+const workspaceId = process.env.ANTHROPIC_WORKSPACE_ID;
+const client = new Anthropic(
+  workspaceId ? { defaultHeaders: { "anthropic-workspace-id": workspaceId } } : {}
+);
 
 // $2 per session by default — a session is a cumulative spend cap across every
 // message sent in it, not a per-message cap. Raise MINA_SESSION_BUDGET_CENTS
