@@ -129,10 +129,19 @@ async function streamTurn(req: express.Request, res: Response, message?: string)
     "X-Accel-Buffering": "no",
   });
   res.flushHeaders();
-  const write = (event: UiEvent) => res.write(`data: ${JSON.stringify(event)}\n\n`);
-  const heartbeat = setInterval(() => res.write(": keep-alive\n\n"), 15000);
+  let open = true;
+  const write = (event: UiEvent) => {
+    if (open) res.write(`data: ${JSON.stringify(event)}\n\n`);
+  };
+  const heartbeat = setInterval(() => open && res.write(": keep-alive\n\n"), 15000);
   const abort = new AbortController();
-  res.on("close", () => abort.abort());
+  // A turn that sent a message keeps going if the browser leaves, so the conversation's
+  // state (and anything waiting on approval) is still recorded. Re-attaching streams just stop.
+  const giveUp = message ? setTimeout(() => abort.abort(), 30 * 60 * 1000) : undefined;
+  res.on("close", () => {
+    open = false;
+    if (!message) abort.abort();
+  });
 
   try {
     await runTurn(req.params.id as string, write, { message, signal: abort.signal });
@@ -144,7 +153,8 @@ async function streamTurn(req: express.Request, res: Response, message?: string)
     }
   } finally {
     clearInterval(heartbeat);
-    res.end();
+    clearTimeout(giveUp);
+    if (open) res.end();
   }
 }
 

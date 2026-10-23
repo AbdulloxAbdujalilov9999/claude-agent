@@ -1,23 +1,26 @@
 :root {
-  --bg: #f7f5f0;
-  --panel: #efece5;
+  --bg: #f3f6fc;
+  --panel: #e8eef8;
   --surface: #ffffff;
-  --surface-2: #faf8f4;
-  --border: #e3ded4;
-  --border-strong: #d2cbbe;
-  --ink: #1f1d1a;
-  --ink-2: #57524a;
-  --ink-3: #8b847a;
-  --accent: #c8642b;
+  --surface-2: #f7f9fd;
+  --border: #d9e1ef;
+  --border-strong: #c3cfe3;
+  --ink: #0d1a36;
+  --ink-2: #44516d;
+  --ink-3: #7b87a1;
+  --accent: #1d3b7a;
   --accent-ink: #ffffff;
-  --accent-soft: #f6e4d7;
-  --good: #2f7d4f;
-  --good-soft: #e3f1e8;
+  --accent-soft: #dfe7f7;
+  --good: #1f7a55;
+  --good-soft: #e0f2ea;
   --bad: #b2402f;
   --bad-soft: #f8e3df;
-  --warn-soft: #fdf1dc;
-  --warn-border: #e9c88e;
-  --shadow: 0 1px 2px rgba(31, 29, 26, 0.04), 0 8px 24px rgba(31, 29, 26, 0.06);
+  --warn-soft: #fdf0dd;
+  --warn-border: #edc58a;
+  --done: #2f7bf5;
+  --waiting: #f08a24;
+  --working: #3fa9ff;
+  --shadow: 0 1px 2px rgba(13, 26, 54, 0.05), 0 8px 24px rgba(13, 26, 54, 0.08);
   --radius: 14px;
   --sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
   --serif: "Newsreader", ui-serif, Georgia, serif;
@@ -27,49 +30,55 @@
 
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
-    --bg: #151412;
-    --panel: #1c1b18;
-    --surface: #23211e;
-    --surface-2: #1f1d1a;
-    --border: #2f2c28;
-    --border-strong: #3d3934;
-    --ink: #ece8e1;
-    --ink-2: #b9b2a7;
-    --ink-3: #847d73;
-    --accent: #e58a4e;
-    --accent-ink: #1a1410;
-    --accent-soft: #3a2619;
-    --good: #6cc391;
-    --good-soft: #1c2f24;
-    --bad: #ec8a78;
-    --bad-soft: #3a1f1a;
-    --warn-soft: #33281a;
-    --warn-border: #6b5330;
-    --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 8px 24px rgba(0, 0, 0, 0.25);
+    --bg: #0b1530;
+    --panel: #0f1c3b;
+    --surface: #142446;
+    --surface-2: #112040;
+    --border: #1f3158;
+    --border-strong: #2b4270;
+    --ink: #e8eefb;
+    --ink-2: #aab7d4;
+    --ink-3: #7182a6;
+    --accent: #7aa2ff;
+    --accent-ink: #0b1530;
+    --accent-soft: #1c3062;
+    --good: #5fcf9a;
+    --good-soft: #13312a;
+    --bad: #ff8f7d;
+    --bad-soft: #3a1f26;
+    --warn-soft: #33281c;
+    --warn-border: #7a5a2c;
+    --done: #5b9bff;
+    --waiting: #ff9d3d;
+    --working: #6fd0ff;
+    --shadow: 0 1px 2px rgba(0, 0, 0, 0.35), 0 8px 24px rgba(0, 0, 0, 0.3);
     color-scheme: dark;
   }
 }
 
 :root[data-theme="dark"] {
-  --bg: #151412;
-  --panel: #1c1b18;
-  --surface: #23211e;
-  --surface-2: #1f1d1a;
-  --border: #2f2c28;
-  --border-strong: #3d3934;
-  --ink: #ece8e1;
-  --ink-2: #b9b2a7;
-  --ink-3: #847d73;
-  --accent: #e58a4e;
-  --accent-ink: #1a1410;
-  --accent-soft: #3a2619;
-  --good: #6cc391;
-  --good-soft: #1c2f24;
-  --bad: #ec8a78;
-  --bad-soft: #3a1f1a;
-  --warn-soft: #33281a;
-  --warn-border: #6b5330;
-  --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 8px 24px rgba(0, 0, 0, 0.25);
+  --bg: #0b1530;
+  --panel: #0f1c3b;
+  --surface: #142446;
+  --surface-2: #112040;
+  --border: #1f3158;
+  --border-strong: #2b4270;
+  --ink: #e8eefb;
+  --ink-2: #aab7d4;
+  --ink-3: #7182a6;
+  --accent: #7aa2ff;
+  --accent-ink: #0b1530;
+  --accent-soft: #1c3062;
+  --good: #5fcf9a;
+  --good-soft: #13312a;
+  --bad: #ff8f7d;
+  --bad-soft: #3a1f26;
+  --warn-soft: #33281c;
+  --warn-border: #7a5a2c;
+  --done: #5b9bff;
+  --waiting: #ff9d3d;
+  --working: #6fd0ff;
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.35), 0 8px 24px rgba(0, 0, 0, 0.3);
   color-scheme: dark;
 }
 
@@ -91,7 +100,7 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
 /* Mina's orb */
 .orb {
   width: 22px; height: 22px; border-radius: 50%;
-  background: radial-gradient(circle at 35% 30%, #ffd9a8 0%, #e08a3c 45%, #7a3a5c 100%);
+  background: radial-gradient(circle at 35% 30%, #e6efff 0%, #6f9cf5 38%, #1d3b7a 72%, #0a1633 100%);
   box-shadow: inset 0 -2px 6px rgba(0, 0, 0, 0.15);
   flex: none;
 }
@@ -148,7 +157,23 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
 .session:hover { background: color-mix(in srgb, var(--ink) 5%, transparent); color: var(--ink); }
 .session.active { background: var(--surface); color: var(--ink); box-shadow: 0 0 0 1px var(--border); }
 .session .name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.session .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); flex: none; animation: pulse 1.4s ease-in-out infinite; }
+.state-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+.state-dot.done { background: var(--done); }
+.state-dot.waiting { background: var(--waiting); box-shadow: 0 0 0 3px color-mix(in srgb, var(--waiting) 22%, transparent); }
+.state-dot.working { background: var(--working); animation: glitch 1.1s steps(1) infinite; }
+/* A dot that "glitches": jumps a pixel, splits its colour, and flickers while Mina works. */
+@keyframes glitch {
+  0%   { transform: none; box-shadow: none; opacity: 1; }
+  12%  { transform: translate(1px, -1px); box-shadow: -2px 0 0 #ff4d8d, 2px 0 0 #3df2ff; }
+  18%  { transform: translate(-1px, 0); box-shadow: 2px 0 0 #ff4d8d, -2px 0 0 #3df2ff; opacity: 0.55; }
+  24%  { transform: none; box-shadow: none; opacity: 1; }
+  52%  { transform: scale(1.25); }
+  58%  { transform: translate(0, 1px) scaleX(1.6); box-shadow: -3px 0 0 #3df2ff; opacity: 0.7; }
+  64%  { transform: none; box-shadow: none; opacity: 1; }
+  86%  { opacity: 0.35; }
+  90%  { opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) { .state-dot.working { animation: pulse 1.4s ease-in-out infinite; } }
 .session .more { opacity: 0; border: 0; background: none; padding: 2px 4px; border-radius: 6px; color: var(--ink-3); }
 .session:hover .more, .session.active .more, .session .more:focus { opacity: 1; }
 .session .more:hover { color: var(--ink); background: var(--panel); }
@@ -175,7 +200,7 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
 .status-pill::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
 .status-pill.running { color: var(--accent); background: var(--accent-soft); }
 .status-pill.running::before { animation: pulse 1.4s ease-in-out infinite; }
-.status-pill.waiting { color: #9a6a12; background: var(--warn-soft); }
+.status-pill.waiting { color: var(--waiting); background: var(--warn-soft); }
 @keyframes pulse { 50% { opacity: 0.35; } }
 
 .scroller { flex: 1; overflow-y: auto; scroll-behavior: smooth; }
@@ -253,7 +278,7 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
   display: flex; flex-direction: column; gap: 10px; box-shadow: var(--shadow);
 }
 .approval-head { display: flex; align-items: center; gap: 8px; font-weight: 600; font-size: 14px; }
-.approval-head svg { color: #b07a1b; }
+.approval-head svg { color: var(--waiting); }
 .approval p { margin: 0; font-size: 14px; color: var(--ink-2); }
 .approval pre {
   margin: 0; background: var(--surface); border: 1px solid var(--border); border-radius: 9px; padding: 10px 12px;
@@ -330,3 +355,26 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
   .row.mina > .orb { display: none; }
   .bubble { max-width: 92%; }
 }
+
+/* Toggles and install in the sidebar */
+.sidebar-link.toggle.on { color: var(--ink); }
+.sidebar-link.toggle.on svg { color: var(--accent); }
+.sidebar-link.install { color: var(--accent); font-weight: 500; }
+
+/* Mic */
+.mic { color: var(--ink-3); }
+.mic.live { color: var(--accent-ink); background: var(--accent); animation: pulse 1.4s ease-in-out infinite; }
+
+/* Listening overlay */
+.voice-overlay {
+  position: fixed; inset: 0; z-index: 70; display: grid; place-items: end center; padding: 16px 16px max(24px, env(safe-area-inset-bottom));
+  background: color-mix(in srgb, var(--bg) 55%, transparent); backdrop-filter: blur(6px);
+}
+.voice-card {
+  width: 100%; max-width: 420px; display: flex; flex-direction: column; align-items: center; gap: 14px;
+  background: var(--surface); border: 1px solid var(--border); border-radius: 22px; padding: 26px 22px 20px; box-shadow: var(--shadow);
+  animation: rise 0.2s ease-out;
+}
+.voice-text { margin: 0; font: 19px/1.4 var(--serif); text-align: center; min-height: 1.4em; overflow-wrap: anywhere; }
+.orb.listening { animation: listen 1.2s ease-in-out infinite; }
+@keyframes listen { 50% { transform: scale(1.1); box-shadow: 0 0 0 10px color-mix(in srgb, var(--accent) 18%, transparent); } }
