@@ -1,7 +1,9 @@
 import "dotenv/config";
 import express from "express";
+import cors from "cors";
 import { query, tool, createSdkMcpServer } from "@anthropic-ai/claude-agent-sdk";
 import { z } from "zod";
+import { chatWithMina, MinaConfigError } from "./mina.js";
 
 const add = tool(
   "add",
@@ -19,10 +21,30 @@ const toolsServer = createSdkMcpServer({
 });
 
 const app = express();
+app.use(cors());
 app.use(express.json());
 
 app.get("/health", (_req, res) => {
   res.json({ status: "ok" });
+});
+
+app.post("/mina/chat", async (req, res) => {
+  const message = req.body?.message;
+  const sessionId = req.body?.sessionId;
+  if (typeof message !== "string" || message.trim() === "") {
+    return res.status(400).json({ error: "Body must include a non-empty 'message' string." });
+  }
+  try {
+    const result = await chatWithMina(message, typeof sessionId === "string" ? sessionId : undefined);
+    res.json(result);
+  } catch (err) {
+    if (err instanceof MinaConfigError) {
+      console.error(err);
+      return res.status(500).json({ error: "Mina isn't configured on the server yet (missing agent/environment id)." });
+    }
+    console.error(err);
+    res.status(500).json({ error: "Internal error talking to Mina." });
+  }
 });
 
 app.post("/chat", async (req, res) => {
