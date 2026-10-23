@@ -34,6 +34,7 @@ npm run dev            # http://localhost:3000
 | Variable | What it is |
 | --- | --- |
 | `ANTHROPIC_API_KEY` | Your Anthropic API key |
+| `DATABASE_URL` | Optional. Postgres URI (Supabase session pooler). Enables push notifications that arrive even when Mina is closed; the server creates its tables and push keys on first use |
 | `ANTHROPIC_WORKSPACE_ID` | Optional. Required only for user-scoped keys (`sk-ant-usr-...`): the `wrkspc_...` id of the workspace |
 | `MINA_AGENT_ID` | The Mina agent's id (`agent_...`) |
 | `MINA_ENVIRONMENT_ID` | The environment her sessions run in (`env_...`) |
@@ -59,6 +60,6 @@ The free plan sleeps when idle. Mina will still work, but the first page load af
 ## Mina on your devices
 
 - **Install as an app.** In Chrome on a Mac or Android, click **Install Mina app** in the sidebar (or the install icon in the address bar). She then opens in her own window and shows up in the Dock or home screen.
-- **Notifications.** Turn them on in the sidebar. Mina pings you when a conversation finishes or needs your decision, as long as the app is open (even in the background).
+- **Notifications.** Turn them on in the sidebar. Mina pings you when a conversation finishes or needs your decision. With `DATABASE_URL` set, these arrive as real push notifications even when Mina is closed; without it, only while the app is open.
 - **Status dots.** Blue: done. Orange: waiting for you. Glitching dot: working.
 - **Voice.** Tap the mic to dictate. Turn on **“Hey Mina”** in the sidebar and she listens for her name while the app is open, then reads her reply aloud. This uses Chrome's built-in speech recognition.

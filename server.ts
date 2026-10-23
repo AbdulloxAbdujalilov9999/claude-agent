@@ -12,6 +12,7 @@ import {
   confirmTool,
   createSession,
   getHistory,
+  getSession,
   interrupt,
   listSessions,
   MinaConfigError,
@@ -20,6 +21,7 @@ import {
   type UiEvent,
 } from "./mina.js";
 import { isSignedIn, login, logout, requireAuth } from "./auth.js";
+import { pushPublicKey, pushToAll, removeSubscription, saveSubscription } from "./push.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 
@@ -130,7 +132,17 @@ async function streamTurn(req: express.Request, res: Response, message?: string)
   });
   res.flushHeaders();
   let open = true;
+  const sessionId = req.params.id as string;
+  let lastText = "";
+  let pushedWaiting = false;
   const write = (event: UiEvent) => {
+    if (event.t === "text") lastText = event.text;
+    if (event.t === "status" && event.status === "waiting" && !pushedWaiting) {
+      pushedWaiting = true;
+      notify(sessionId, "waiting");
+    }
+    if (event.t === "status" && event.status === "running") pushedWaiting = false;
+    if (event.t === "done") notify(sessionId, event.reason === "terminated" ? "ended" : "done", lastText);
     if (open) res.write(`data: ${JSON.stringify(event)}\n\n`);
   };
   const heartbeat = setInterval(() => open && res.write(": keep-alive\n\n"), 15000);
@@ -144,7 +156,7 @@ async function streamTurn(req: express.Request, res: Response, message?: string)
   });
 
   try {
-    await runTurn(req.params.id as string, write, { message, signal: abort.signal });
+    await runTurn(sessionId, write, { message, signal: abort.signal });
   } catch (err) {
     if (!abort.signal.aborted) {
       console.error(err);
@@ -157,6 +169,39 @@ async function streamTurn(req: express.Request, res: Response, message?: string)
     if (open) res.end();
   }
 }
+
+const PUSH_TITLES = { done: "Mina is done", waiting: "Mina needs your decision", ended: "Mina stopped" } as const;
+
+function notify(sessionId: string, kind: keyof typeof PUSH_TITLES, text = "") {
+  void (async () => {
+    const title = await getSession(sessionId).then((s) => s.title).catch(() => "Your conversation");
+    const body = (kind === "done" && text ? text.replace(/[#*_`>]/g, "").replace(/\s+/g, " ").trim() : title).slice(0, 180);
+    await pushToAll({ title: PUSH_TITLES[kind], body, sessionId, kind });
+  })();
+}
+
+app.get("/api/push/key", async (_req, res) => {
+  res.json({ publicKey: await pushPublicKey() });
+});
+
+app.post("/api/push/subscribe", async (req, res) => {
+  const sub = req.body?.subscription;
+  if (typeof sub?.endpoint !== "string" || typeof sub?.keys?.p256dh !== "string" || typeof sub?.keys?.auth !== "string") {
+    return res.status(400).json({ error: "Body must include a push 'subscription'." });
+  }
+  try {
+    await saveSubscription(sub, req.get("user-agent"));
+    res.json({ ok: true });
+  } catch (err) {
+    console.error(err);
+    res.status(503).json({ error: "Push notifications aren't set up on the server yet." });
+  }
+});
+
+app.post("/api/push/unsubscribe", async (req, res) => {
+  if (typeof req.body?.endpoint === "string") await removeSubscription(req.body.endpoint).catch(() => {});
+  res.json({ ok: true });
+});
 
 app.post("/api/sessions/:id/messages", async (req, res) => {
   const text = req.body?.text;

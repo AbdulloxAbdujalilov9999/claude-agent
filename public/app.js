@@ -808,7 +808,8 @@ const ANNOUNCE = {
 
 async function announce(session, kind = session?.state, text = "") {
   updateBadge();
-  if (!session || !ANNOUNCE[kind] || !notificationsOn()) return;
+  // With server push on, the server sends these itself (even when Mina is closed).
+  if (!session || !ANNOUNCE[kind] || !notificationsOn() || pushActive) return;
   if (!document.hidden && session.id === state.currentId) return;
   const body = (text ? plainText(text) : session.title).slice(0, 180);
   const options = { body, tag: `${session.id}:${kind}`, icon: "/icons/icon-192.png", badge: "/icons/badge.png", data: { sessionId: session.id } };
@@ -837,6 +838,49 @@ function renderToggles() {
   $("#wake-label").textContent = `“Hey Mina”: ${voice.wakeEnabled ? "on" : "off"}`;
   wake.classList.toggle("on", voice.wakeEnabled);
   notify.classList.toggle("on", notificationsOn());
+}
+
+// ---------- server push (works when Mina is closed) ----------
+let pushActive = false;
+
+function urlBase64ToBytes(base64) {
+  const padded = (base64 + "=".repeat((4 - (base64.length % 4)) % 4)).replace(/-/g, "+").replace(/_/g, "/");
+  return Uint8Array.from(atob(padded), (c) => c.charCodeAt(0));
+}
+
+async function enablePush() {
+  pushActive = false;
+  try {
+    if (!("PushManager" in window) || !navigator.serviceWorker) return;
+    const { publicKey } = await api("/api/push/key");
+    if (!publicKey) return;
+    const reg = await navigator.serviceWorker.ready;
+    let sub = await reg.pushManager.getSubscription();
+    const key = urlBase64ToBytes(publicKey);
+    const sameKey = sub && sub.options.applicationServerKey &&
+      new Uint8Array(sub.options.applicationServerKey).every((b, i) => b === key[i]);
+    if (sub && !sameKey) {
+      await sub.unsubscribe();
+      sub = null;
+    }
+    sub ||= await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: key });
+    await api("/api/push/subscribe", { method: "POST", body: { subscription: sub.toJSON() } });
+    pushActive = true;
+  } catch (err) {
+    console.warn("Push unavailable", err);
+  }
+}
+
+async function disablePush() {
+  pushActive = false;
+  try {
+    const reg = await navigator.serviceWorker?.ready;
+    const sub = await reg?.pushManager.getSubscription();
+    if (sub) {
+      await api("/api/push/unsubscribe", { method: "POST", body: { endpoint: sub.endpoint } }).catch(() => {});
+      await sub.unsubscribe();
+    }
+  } catch {}
 }
 
 let installPrompt = null;
@@ -870,11 +914,17 @@ function setupExtras() {
   $("#notify-toggle").addEventListener("click", async () => {
     if (notificationsOn()) {
       setPref("mina-notify", "off");
+      disablePush();
     } else {
       const result = Notification.permission === "default" ? await Notification.requestPermission() : Notification.permission;
       if (result === "granted") {
         setPref("mina-notify", "on");
-        toast("Notifications on. Mina will ping you when she's done or needs you.");
+        await enablePush();
+        toast(
+          pushActive
+            ? "Notifications on, even when Mina is closed."
+            : "Notifications on. Mina will ping you when she's done or needs you."
+        );
       } else {
         toast("Notifications are blocked for this site. Allow them in your browser's site settings.");
       }
@@ -892,6 +942,7 @@ function setupExtras() {
   });
   renderToggles();
   updateBadge();
+  if (notificationsOn()) enablePush();
   const deepLink = new URLSearchParams(location.search).get("s");
   if (deepLink) {
     history.replaceState(null, "", "/");
