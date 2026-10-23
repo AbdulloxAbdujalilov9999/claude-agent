@@ -162,6 +162,10 @@ export async function createSession(title?: string): Promise<SessionSummary> {
   return toSummary(session);
 }
 
+export async function getSession(sessionId: string): Promise<SessionSummary> {
+  return toSummary(await client.beta.sessions.retrieve(sessionId));
+}
+
 export async function renameSession(sessionId: string, title: string): Promise<SessionSummary> {
   return toSummary(await client.beta.sessions.update(sessionId, { title }));
 }
