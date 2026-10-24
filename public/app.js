@@ -711,9 +711,27 @@ function lastReplyText() {
   return blocks.length ? blocks[blocks.length - 1].text : "";
 }
 
+// Mina is mid-turn: add the message to the conversation; she picks it up as she goes.
+async function queueMessage(text) {
+  const sessionId = state.currentId;
+  apply({ t: "user", text });
+  showTyping(true);
+  scrollToBottom(true);
+  try {
+    await api(`/api/sessions/${sessionId}/queue`, { method: "POST", body: { text } });
+    // The turn may have ended just before the message landed; watch the next one.
+    if (!state.busy && state.currentId === sessionId) followStream();
+  } catch (err) {
+    showTyping(false);
+    toast(err.message);
+  }
+}
+
 async function send(text) {
   text = text.trim();
-  if (!text || state.busy) return;
+  if (!text) return;
+  if (state.busy && state.currentId) return queueMessage(text);
+  if (state.busy) return;
   $("#empty").hidden = true;
   if (!state.currentId) {
     try {
@@ -746,9 +764,12 @@ function autosize() {
   input.style.height = Math.min(input.scrollHeight, 220) + "px";
 }
 function updateComposer() {
-  $("#send").disabled = state.busy || !input.value.trim();
-  $("#send").hidden = state.busy;
-  $("#stop").hidden = !state.busy;
+  const hasText = Boolean(input.value.trim());
+  $("#send").disabled = !hasText;
+  // While Mina works: Stop when the box is empty, Send (queue) once you type.
+  $("#send").hidden = state.busy && !hasText;
+  $("#stop").hidden = !state.busy || hasText;
+  input.placeholder = state.busy ? "Add to the conversation… Mina will pick it up" : "Message Mina…";
 }
 input.addEventListener("input", () => {
   autosize();
@@ -762,11 +783,11 @@ input.addEventListener("keydown", (e) => {
 });
 $("#composer").addEventListener("submit", (e) => {
   e.preventDefault();
-  if (state.busy) return;
   const text = input.value;
   if (!text.trim()) return;
   input.value = "";
   autosize();
+  updateComposer();
   send(text);
 });
 $("#stop").addEventListener("click", async () => {
@@ -932,10 +953,16 @@ function setupExtras() {
     renderToggles();
   });
   $("#wake-toggle").addEventListener("click", () => setWake(!voice.wakeEnabled));
-  $("#mic").addEventListener("click", () => (voice.mode === "dictate" ? stopDictation() : startDictation()));
+  // Tapping the mic again sends right away instead of waiting for the pause.
+  $("#mic").addEventListener("click", () => (voice.mode === "dictate" ? stopDictation(true) : startDictation()));
   $("#mic").hidden = !Recognition;
   $("#voice-cancel").addEventListener("click", () => {
-    if (voice.mode === "dictate") return stopDictation(false);
+    if (voice.mode === "dictate") {
+      input.value = voice.dictateBase || "";
+      autosize();
+      updateComposer();
+      return stopDictation(false);
+    }
     clearTimeout(voice.commandTimer);
     voice.mode = voice.wakeEnabled ? "wake" : "off";
     showListening(false);
@@ -962,6 +989,9 @@ const voice = {
   speakNext: false, // read the reply to this turn aloud
   commandTimer: null,
   restartTimer: null,
+  pauseTimer: null,
+  pending: "", // what's been heard so far for the current request
+  start: 0, // result index where "Hey Mina" was heard
 };
 
 function chime(up = true) {
@@ -1020,10 +1050,13 @@ function startRecognition({ continuous }) {
   rec.onend = () => {
     if (voice.rec !== rec) return;
     voice.rec = null;
+    // Some browsers (Android) stop listening on their own; act on what was heard so far.
     if (voice.mode === "dictate") {
+      if (voice.pending) return stopDictation(true);
       voice.mode = "off";
       showListening(false);
     }
+    if (voice.mode === "command" && voice.pending) finishCommand(voice.pending);
     // Browsers end recognition every so often; keep the wake word alive.
     if (voice.wakeEnabled && !speechSynthesis.speaking) {
       if (voice.mode === "off") voice.mode = "wake";
@@ -1036,53 +1069,62 @@ function startRecognition({ continuous }) {
   } catch {}
 }
 
-function onSpeech(e) {
-  let interim = "";
-  let final = "";
-  for (let i = e.resultIndex; i < e.results.length; i++) {
-    const r = e.results[i];
-    if (r.isFinal) final += r[0].transcript;
-    else interim += r[0].transcript;
-  }
-  const heard = (final || interim).trim();
-  if (!heard) return;
+// Joins everything heard in this recognition run from result `start` on.
+function heardFrom(e, start) {
+  let text = "";
+  for (let i = start; i < e.results.length; i++) text += e.results[i][0].transcript;
+  return text.trim();
+}
 
+// Mina waits for a real pause before acting, so she doesn't cut you off mid-sentence.
+const PAUSE_MS = 1800;
+function armPause(done) {
+  clearTimeout(voice.pauseTimer);
+  voice.pauseTimer = setTimeout(done, PAUSE_MS);
+}
+
+function onSpeech(e) {
   if (voice.mode === "wake") {
-    const match = heard.match(WAKE);
-    if (!match) return;
-    voice.mode = "command";
-    chime(true);
-    const rest = heard.slice(match.index + match[0].length).trim();
-    showListening(true, rest || "Yes, Abdulloh?");
-    armCommandTimeout();
-    if (final && rest) finishCommand(rest);
-    return;
+    for (let i = e.resultIndex; i < e.results.length; i++) {
+      if (WAKE.test(e.results[i][0].transcript)) {
+        voice.mode = "command";
+        voice.start = i;
+        voice.pending = "";
+        chime(true);
+        showListening(true, "Yes, Abdulloh?");
+        armCommandTimeout();
+        break;
+      }
+    }
+    if (voice.mode !== "command") return;
   }
 
   if (voice.mode === "command") {
-    const text = heard.replace(WAKE, "").trim();
+    const text = heardFrom(e, voice.start).replace(WAKE, "").trim();
     if (!text) return;
+    voice.pending = text;
+    clearTimeout(voice.commandTimer);
     showListening(true, text);
-    armCommandTimeout();
-    if (final) finishCommand(text);
+    armPause(() => finishCommand(voice.pending));
     return;
   }
 
   if (voice.mode === "dictate") {
-    input.value = (voice.dictateBase + " " + heard).trim();
+    const text = heardFrom(e, 0);
+    if (!text) return;
+    voice.pending = text;
+    input.value = (voice.dictateBase + " " + text).trim();
     autosize();
     updateComposer();
-    showListening(true, heard);
-    if (final) {
-      stopDictation(true);
-    }
+    showListening(true, text);
+    armPause(() => stopDictation(true));
   }
 }
 
 function armCommandTimeout() {
   clearTimeout(voice.commandTimer);
   voice.commandTimer = setTimeout(() => {
-    if (voice.mode !== "command") return;
+    if (voice.mode !== "command" || voice.pending) return;
     voice.mode = "wake";
     showListening(false);
     chime(false);
@@ -1091,9 +1133,11 @@ function armCommandTimeout() {
 
 function finishCommand(text) {
   clearTimeout(voice.commandTimer);
+  clearTimeout(voice.pauseTimer);
   voice.mode = "wake";
+  voice.pending = "";
   showListening(false);
-  if (state.busy) return toast("Mina is still working on the last thing. Try again when she's done.");
+  if (!text) return;
   voice.speakNext = true;
   send(text);
 }
@@ -1102,15 +1146,18 @@ function startDictation() {
   if (!Recognition) return;
   speechSynthesis.cancel();
   voice.mode = "dictate";
+  voice.pending = "";
   voice.dictateBase = input.value.trim();
   showListening(true);
-  startRecognition({ continuous: false });
+  startRecognition({ continuous: true });
 }
 
 function stopDictation(submit = false) {
+  clearTimeout(voice.pauseTimer);
   voice.mode = voice.wakeEnabled ? "wake" : "off";
+  voice.pending = "";
   showListening(false);
-  if (submit && input.value.trim() && !state.busy) {
+  if (submit && input.value.trim()) {
     voice.speakNext = true;
     $("#composer").requestSubmit();
   }
@@ -1146,25 +1193,49 @@ function plainText(markdown) {
     .trim();
 }
 
+// Picks the most natural voice the device has. Premium/Enhanced system voices and Google's
+// network voices sound far better than the default.
+function bestVoice(lang) {
+  const voices = speechSynthesis.getVoices().filter((v) => v.lang.toLowerCase().startsWith(lang.slice(0, 2).toLowerCase()));
+  const rank = (v) => {
+    const n = v.name;
+    if (/premium/i.test(n)) return 0;
+    if (/enhanced|neural|natural/i.test(n)) return 1;
+    if (/Google US English|Google UK English Female/i.test(n)) return 2;
+    if (/^(Ava|Zoe|Samantha|Allison|Susan|Serena|Karen|Moira|Tessa)\b/i.test(n)) return 3;
+    if (/Google/i.test(n)) return 4;
+    if (!v.localService) return 5;
+    return 6;
+  };
+  return voices.sort((a, b) => rank(a) - rank(b))[0] || null;
+}
+if ("speechSynthesis" in window) speechSynthesis.onvoiceschanged = () => {};
+
 function speak(markdown) {
-  const text = plainText(markdown).slice(0, 900);
+  const text = plainText(markdown).slice(0, 1500);
   if (!text || !("speechSynthesis" in window)) return;
   stopRecognition(); // don't let Mina hear herself
-  const u = new SpeechSynthesisUtterance(text);
-  u.lang = navigator.language || "en-US";
-  const voices = speechSynthesis.getVoices();
-  u.voice =
-    voices.find((v) => /samantha|ava|serena|google uk english female|zira|aria/i.test(v.name)) ||
-    voices.find((v) => v.lang.startsWith(u.lang.slice(0, 2))) ||
-    null;
-  u.rate = 1.03;
-  u.onend = u.onerror = () => {
-    if (voice.wakeEnabled && !voice.rec) {
-      voice.mode = "wake";
-      startRecognition({ continuous: true });
+  speechSynthesis.cancel();
+  const lang = navigator.language || "en-US";
+  const v = bestVoice(lang);
+  // Chrome cuts long utterances off after ~15 seconds, so speak sentence by sentence.
+  const parts = text.match(/[^.!?]+[.!?]*\s*/g) || [text];
+  parts.forEach((part, i) => {
+    const u = new SpeechSynthesisUtterance(part.trim());
+    u.lang = v?.lang || lang;
+    u.voice = v;
+    u.rate = 1;
+    u.pitch = 1.02;
+    if (i === parts.length - 1) {
+      u.onend = u.onerror = () => {
+        if (voice.wakeEnabled && !voice.rec) {
+          voice.mode = "wake";
+          startRecognition({ continuous: true });
+        }
+      };
     }
-  };
-  speechSynthesis.speak(u);
+    speechSynthesis.speak(u);
+  });
 }
 
 // ---------- boot ----------

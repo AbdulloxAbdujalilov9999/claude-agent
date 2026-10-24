@@ -157,6 +157,18 @@ export async function createSession(title?: string): Promise<SessionSummary> {
     agent: { type: "agent", id: agentId },
     environment_id: environmentId,
     title: title ?? null,
+    // Mina's long-term memory, shared by every conversation.
+    resources: process.env.MINA_MEMORY_STORE_ID
+      ? [
+          {
+            type: "memory_store",
+            memory_store_id: process.env.MINA_MEMORY_STORE_ID,
+            access: "read_write",
+            instructions:
+              "Your long-term memory about Abdulloh: his business, people, preferences, decisions, voice and open tasks. Check it at the start of a conversation and whenever context would help. Save durable facts as you learn them. Never store passwords, keys or other secrets.",
+          },
+        ]
+      : [],
     budget: { type: "limit", max_list_cost: { amount: BUDGET_CENTS, currency: "USD" } },
   });
   return toSummary(session);
@@ -199,6 +211,13 @@ export async function confirmTool(
         ...(result === "deny" && denyMessage ? { deny_message: denyMessage } : {}),
       },
     ],
+  });
+}
+
+/** Adds a message to a conversation that may be mid-turn; Mina picks it up when she can. */
+export async function sendMessage(sessionId: string, text: string): Promise<void> {
+  await client.beta.sessions.events.send(sessionId, {
+    events: [{ type: "user.message", content: [{ type: "text", text }] }],
   });
 }
 

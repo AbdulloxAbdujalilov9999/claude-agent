@@ -14,6 +14,7 @@ import {
   getHistory,
   getSession,
   interrupt,
+  sendMessage,
   listSessions,
   MinaConfigError,
   renameSession,
@@ -209,6 +210,20 @@ app.post("/api/sessions/:id/messages", async (req, res) => {
     return res.status(400).json({ error: "Body must include a non-empty 'text' string." });
   }
   await streamTurn(req, res, text);
+});
+
+// For a message sent while Mina is still working: it joins the turn already streaming.
+app.post("/api/sessions/:id/queue", async (req, res) => {
+  const text = req.body?.text;
+  if (typeof text !== "string" || text.trim() === "") {
+    return res.status(400).json({ error: "Body must include a non-empty 'text' string." });
+  }
+  try {
+    await sendMessage(req.params.id, text);
+    res.json({ ok: true });
+  } catch (err) {
+    sendError(res, err, "Couldn't send that to Mina.");
+  }
 });
 
 app.get("/api/sessions/:id/stream", async (req, res) => {
