@@ -177,6 +177,8 @@ async function loadSessions({ quiet = false } = {}) {
     const before = new Map(state.sessions.map((s) => [s.id, s.state]));
     state.sessions = sessions;
     renderSessions();
+    const current = sessions.find((x) => x.id === state.currentId);
+    if (current && !document.querySelector(".session input")) $("#chat-title").textContent = current.title;
     // Tell Abdulloh when a conversation he isn't looking at moves on by itself.
     for (const s of sessions) {
       const was = before.get(s.id);
@@ -738,6 +740,8 @@ async function runStream(url, init) {
     }
     if (ended) {
       markSessionState(sessionId, ended);
+      // Mina names the conversation a few seconds after she answers.
+      setTimeout(() => loadSessions({ quiet: true }), 6000);
       announce(sessionById(sessionId), ended, lastReplyText());
       // Don't talk over a video she just started.
       const reply = lastReplyText();
@@ -1036,6 +1040,10 @@ function setupExtras() {
   // Tapping the mic again sends right away instead of waiting for the pause.
   $("#mic").addEventListener("click", () => (voice.mode === "dictate" ? stopDictation(true) : startDictation()));
   $("#mic").hidden = !Recognition;
+  $("#voice-send").addEventListener("click", () => {
+    if (voice.mode === "dictate") return stopDictation(true);
+    if (voice.mode === "command" && voice.pending) finishCommand(voice.pending);
+  });
   $("#voice-cancel").addEventListener("click", () => {
     if (voice.mode === "dictate") {
       input.value = voice.dictateBase || "";
@@ -1049,6 +1057,7 @@ function setupExtras() {
   });
   renderToggles();
   updateBadge();
+  setupMac();
   if (notificationsOn()) enablePush();
   const deepLink = new URLSearchParams(location.search).get("s");
   if (deepLink) {
@@ -1056,6 +1065,46 @@ function setupExtras() {
     openSession(deepLink);
   }
   if (voice.wakeEnabled) setWake(true, { quiet: true });
+}
+
+// ---------- Mac helper ----------
+async function refreshMac() {
+  try {
+    const d = await api("/api/device");
+    $("#mac-label").textContent = d.online ? "Your Mac: connected" : "Connect your Mac";
+    $("#mac-dot").hidden = !d.online;
+    $("#mac-dot").className = "state-dot done";
+    $("#mac-status").textContent = d.online
+      ? "Your Mac is connected. Try: “Open Spotify and play some music.”"
+      : d.lastSeen
+        ? `Not connected right now (last seen ${new Date(d.lastSeen).toLocaleString()}). Is the Mac awake?`
+        : "Not connected yet. Two steps:";
+    $("#mac-install").textContent = d.install || "Set MINA_PASSWORD on the server first.";
+    $("#mac-tool").textContent = JSON.stringify(d.tool, null, 2);
+  } catch {}
+}
+
+function setupMac() {
+  $("#mac-open").addEventListener("click", () => {
+    $("#mac-panel").hidden = false;
+    refreshMac();
+  });
+  $("#mac-close").addEventListener("click", () => ($("#mac-panel").hidden = true));
+  $("#mac-panel").addEventListener("click", (e) => {
+    if (e.target.id === "mac-panel") $("#mac-panel").hidden = true;
+  });
+  for (const btn of document.querySelectorAll("[data-copy]")) {
+    btn.addEventListener("click", async () => {
+      try {
+        await navigator.clipboard.writeText($("#" + btn.dataset.copy).textContent);
+        toast("Copied");
+      } catch {
+        toast("Couldn't copy. Select the text instead.");
+      }
+    });
+  }
+  refreshMac();
+  setInterval(refreshMac, 60000);
 }
 
 // ---------- voice: dictation, "Hey Mina", spoken replies ----------
@@ -1157,7 +1206,7 @@ function heardFrom(e, start) {
 }
 
 // Mina waits for a real pause before acting, so she doesn't cut you off mid-sentence.
-const PAUSE_MS = 1800;
+const PAUSE_MS = 5000;
 function armPause(done) {
   clearTimeout(voice.pauseTimer);
   voice.pauseTimer = setTimeout(done, PAUSE_MS);

@@ -63,3 +63,5 @@ The free plan sleeps when idle. Mina will still work, but the first page load af
 - **Notifications.** Turn them on in the sidebar. Mina pings you when a conversation finishes or needs your decision. With `DATABASE_URL` set, these arrive as real push notifications even when Mina is closed; without it, only while the app is open.
 - **Status dots.** Blue: done. Orange: waiting for you. Glitching dot: working.
 - **Voice.** Tap the mic to dictate. Turn on **“Hey Mina”** in the sidebar and she listens for her name while the app is open, then reads her reply aloud. This uses Chrome's built-in speech recognition.
+- **Your Mac (limited).** Sidebar → **Connect your Mac** gives a one-line Terminal install for Mina Helper, plus a `mac` custom tool definition to add to the agent once in Claude Console. Mina can then open apps and web pages, control Spotify/Apple Music, set the volume and show notifications. She can't run commands, type, click or touch files; the helper only knows those fixed actions.
+- **Titles.** Mina names each conversation after her first reply and refreshes the name after a few turns, unless you renamed it yourself.

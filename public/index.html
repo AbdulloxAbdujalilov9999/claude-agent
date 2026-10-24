@@ -59,6 +59,10 @@
             <svg viewBox="0 0 24 24"><path d="M12 3v12M7 10l5 5 5-5M5 21h14" /></svg>
             Install Mina app
           </button>
+          <button id="mac-open" class="sidebar-link">
+            <svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="12" rx="2" /><path d="M2 20h20" /></svg>
+            <span id="mac-label">Connect your Mac</span><span id="mac-dot" class="state-dot" hidden></span>
+          </button>
           <button id="wake-toggle" class="sidebar-link toggle" aria-label="Toggle Hey Mina wake word">
             <svg viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3" /><path d="M5 11a7 7 0 0 0 14 0M12 18v3" /></svg>
             <span id="wake-label">“Hey Mina”: off</span>
@@ -145,7 +149,33 @@
       <div class="voice-card">
         <div class="orb orb-xl listening" aria-hidden="true"></div>
         <p id="voice-text" class="voice-text" aria-live="polite">Listening…</p>
-        <button id="voice-cancel" class="btn">Cancel</button>
+        <p class="voice-hint muted">Pause for 5 seconds when you're done, or tap Send.</p>
+        <div class="voice-actions">
+          <button id="voice-cancel" class="btn">Cancel</button>
+          <button id="voice-send" class="btn btn-primary">Send</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="mac-panel" class="modal" hidden>
+      <div class="modal-card" role="dialog" aria-labelledby="mac-title">
+        <div class="modal-head">
+          <h3 id="mac-title">Mina on your Mac</h3>
+          <button id="mac-close" class="icon-btn" aria-label="Close"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18" /></svg></button>
+        </div>
+        <p id="mac-status" class="muted">Checking…</p>
+        <p>Mina can open apps and websites, play, pause and skip music, set the volume, and show notifications. She can't run commands or touch your files.</p>
+        <ol class="steps">
+          <li>
+            Open <strong>Terminal</strong> on your Mac, paste this, and press Return:
+            <div class="copy-row"><code id="mac-install"></code><button class="btn" data-copy="mac-install">Copy</button></div>
+          </li>
+          <li>
+            One time only: in <a href="https://platform.claude.com" target="_blank" rel="noopener">Claude Console</a>, open the <strong>Mina</strong> agent, add a <strong>custom tool</strong>, and paste this definition:
+            <div class="copy-row"><code id="mac-tool" class="block"></code><button class="btn" data-copy="mac-tool">Copy</button></div>
+          </li>
+          <li>The first time Mina controls music, macOS asks you to allow it. Click <strong>OK</strong>.</li>
+        </ol>
       </div>
     </div>
 
