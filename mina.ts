@@ -178,8 +178,41 @@ export async function getSession(sessionId: string): Promise<SessionSummary> {
   return toSummary(await client.beta.sessions.retrieve(sessionId));
 }
 
+/**
+ * Gives a conversation a short, specific title once Mina has replied, and refreshes it
+ * after a few more turns as the topic settles. Never touches a title Abdulloh set himself.
+ */
+export async function autoTitle(sessionId: string): Promise<void> {
+  const session = await client.beta.sessions.retrieve(sessionId);
+  if (session.metadata?.mina_title_lock === "user") return;
+  const turns = Number(session.metadata?.mina_turns ?? "0") + 1;
+  const retitle = turns === 1 || turns === 4;
+  await client.beta.sessions.update(sessionId, { metadata: { mina_turns: String(turns) } });
+  if (!retitle) return;
+
+  const lines: string[] = [];
+  for await (const event of client.beta.sessions.events.list(sessionId)) {
+    if (event.type === "user.message") lines.push(`Abdulloh: ${textOf(event.content).slice(0, 400)}`);
+    else if (event.type === "agent.message") lines.push(`Mina: ${textOf(event.content).slice(0, 400)}`);
+    if (lines.length >= 12) break;
+  }
+  if (!lines.length) return;
+  const reply = await client.messages.create({
+    model: process.env.MINA_TITLE_MODEL ?? "claude-haiku-5-5",
+    max_tokens: 30,
+    system:
+      "Name this conversation for a sidebar. Reply with only the title: 2 to 6 words, specific, in the language Abdulloh used, no quotes, no trailing period.",
+    messages: [{ role: "user", content: lines.join("\n") }],
+  });
+  const title = textOf(reply.content as ReadonlyArray<{ type: string; text?: string }>)
+    .replace(/^["'\s]+|["'.\s]+$/g, "")
+    .slice(0, 80);
+  if (title) await client.beta.sessions.update(sessionId, { title });
+}
+
 export async function renameSession(sessionId: string, title: string): Promise<SessionSummary> {
-  return toSummary(await client.beta.sessions.update(sessionId, { title }));
+  // A title Abdulloh picks himself stays put.
+  return toSummary(await client.beta.sessions.update(sessionId, { title, metadata: { mina_title_lock: "user" } }));
 }
 
 export async function archiveSession(sessionId: string): Promise<void> {
@@ -234,7 +267,13 @@ export async function interrupt(sessionId: string): Promise<void> {
 export async function runTurn(
   sessionId: string,
   emit: (event: UiEvent) => void,
-  opts: { message?: string; signal?: AbortSignal; denyApprovals?: boolean } = {}
+  opts: {
+    message?: string;
+    signal?: AbortSignal;
+    denyApprovals?: boolean;
+    /** Runs a custom tool (e.g. the Mac helper). Unknown tools get an error result. */
+    customTool?: (name: string, input: unknown) => Promise<{ ok: boolean; output: string } | null>;
+  } = {}
 ): Promise<void> {
   // Stream-first: open the stream before sending, so no early events are missed.
   const stream = await client.beta.sessions.events.stream(
@@ -261,14 +300,19 @@ export async function runTurn(
       // Nobody is watching this turn, so nothing that needs approval may run.
       await confirmTool(sessionId, event.id, "deny", "Approvals need the Mina web app; this request came from the API.");
     } else if (event.type === "agent.custom_tool_use") {
-      // Custom tools aren't wired into the web app yet; answer so the session doesn't hang.
+      // Answer every custom tool call so the session never hangs waiting on one.
+      const result = (await opts.customTool?.(event.name, event.input).catch((err) => ({
+        ok: false,
+        output: String(err),
+      }))) ?? { ok: false, output: `The tool "${event.name}" isn't available in this app.` };
+      emit({ t: "tool_result", toolUseId: event.id, isError: !result.ok, preview: preview(result.output) });
       await client.beta.sessions.events.send(sessionId, {
         events: [
           {
             type: "user.custom_tool_result",
             custom_tool_use_id: event.id,
-            content: [{ type: "text", text: `The tool "${event.name}" isn't available in this app yet.` }],
-            is_error: true,
+            content: [{ type: "text", text: result.output || (result.ok ? "Done." : "Failed.") }],
+            is_error: !result.ok,
           },
         ],
       });

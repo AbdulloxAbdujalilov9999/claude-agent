@@ -8,6 +8,7 @@ import { query, tool, createSdkMcpServer } from "@anthropic-ai/claude-agent-sdk"
 import { z } from "zod";
 import {
   archiveSession,
+  autoTitle,
   chatWithMina,
   confirmTool,
   createSession,
@@ -22,6 +23,7 @@ import {
   type UiEvent,
 } from "./mina.js";
 import { isSignedIn, login, logout, requireAuth } from "./auth.js";
+import { MAC_TOOL, deviceToken, jobResult, macStatus, nextJob, requireDevice, runOnMac } from "./device.js";
 import { pushPublicKey, pushToAll, removeSubscription, saveSubscription } from "./push.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -62,6 +64,10 @@ app.get("/api/me", (req, res) => {
 });
 app.post("/api/login", login);
 app.post("/api/logout", logout);
+
+// The Mac helper authenticates with its own pairing token, not the web cookie.
+app.get("/api/device/next", requireDevice, nextJob);
+app.post("/api/device/result", requireDevice, jobResult);
 
 // Everything below costs money or touches Mina's data, so it needs the password.
 app.use(["/api", "/mina", "/chat"], requireAuth);
@@ -147,7 +153,10 @@ async function streamTurn(req: express.Request, res: Response, message?: string)
       notify(sessionId, "waiting");
     }
     if (event.t === "status" && event.status === "running") pushedWaiting = false;
-    if (event.t === "done") notify(sessionId, event.reason === "terminated" ? "ended" : "done", lastText);
+    if (event.t === "done") {
+      notify(sessionId, event.reason === "terminated" ? "ended" : "done", lastText);
+      if (message) autoTitle(sessionId).catch((err) => console.error("Couldn't title conversation", err));
+    }
     if (open) res.write(`data: ${JSON.stringify(event)}\n\n`);
   };
   const heartbeat = setInterval(() => open && res.write(": keep-alive\n\n"), 15000);
@@ -161,7 +170,11 @@ async function streamTurn(req: express.Request, res: Response, message?: string)
   });
 
   try {
-    await runTurn(sessionId, write, { message, signal: abort.signal });
+    await runTurn(sessionId, write, {
+      message,
+      signal: abort.signal,
+      customTool: async (name, input) => (name === "mac" ? runOnMac(input) : null),
+    });
   } catch (err) {
     if (!abort.signal.aborted) {
       console.error(err);
@@ -184,6 +197,16 @@ function notify(sessionId: string, kind: keyof typeof PUSH_TITLES, text = "") {
     await pushToAll({ title: PUSH_TITLES[kind], body, sessionId, kind });
   })();
 }
+
+app.get("/api/device", (req, res) => {
+  const token = deviceToken();
+  const origin = `${req.protocol}://${req.get("host")}`;
+  res.json({
+    ...macStatus(),
+    install: token ? `curl -fsSL ${origin}/helper/install.sh | MINA_SERVER=${origin} bash -s -- ${token}` : null,
+    tool: MAC_TOOL,
+  });
+});
 
 app.get("/api/push/key", async (_req, res) => {
   res.json({ publicKey: await pushPublicKey() });
