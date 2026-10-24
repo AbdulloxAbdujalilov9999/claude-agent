@@ -372,3 +372,22 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
 .voice-text { margin: 0; font: 19px/1.4 var(--serif); text-align: center; min-height: 1.4em; overflow-wrap: anywhere; }
 .orb.listening { animation: listen 1.2s ease-in-out infinite; }
 @keyframes listen { 50% { transform: scale(1.1); box-shadow: 0 0 0 10px color-mix(in srgb, var(--accent) 18%, transparent); } }
+
+/* Speaking bar */
+.speaking {
+  position: fixed; left: 50%; bottom: 120px; transform: translateX(-50%); z-index: 55;
+  display: flex; align-items: center; gap: 10px; padding: 8px 8px 8px 14px; border-radius: 999px;
+  background: var(--surface); border: 1px solid var(--border-strong); box-shadow: var(--shadow); font-size: 14px; font-weight: 500;
+  animation: rise 0.2s ease-out;
+}
+.speaking .btn { padding: 5px 14px; border-radius: 999px; }
+.bars { display: inline-flex; align-items: flex-end; gap: 2px; height: 14px; }
+.bars i { width: 3px; background: var(--accent); border-radius: 2px; animation: bar 0.9s ease-in-out infinite; }
+.bars i:nth-child(2) { animation-delay: 0.15s; } .bars i:nth-child(3) { animation-delay: 0.3s; } .bars i:nth-child(4) { animation-delay: 0.45s; }
+@keyframes bar { 0%, 100% { height: 4px; } 50% { height: 14px; } }
+
+/* YouTube and links Mina finds */
+.media { position: relative; width: 100%; max-width: 560px; aspect-ratio: 16 / 9; border-radius: 12px; overflow: hidden; border: 1px solid var(--border); background: #000; }
+.media .yt { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; }
+.media-link { display: inline-flex; align-items: center; gap: 8px; align-self: flex-start; text-decoration: none; color: var(--ink); }
+.media-link svg { fill: currentColor; stroke: none; }
