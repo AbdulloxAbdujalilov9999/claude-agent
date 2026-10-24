@@ -22,6 +22,8 @@ const ICONS = {
   more: '<circle cx="5" cy="12" r="1.2" /><circle cx="12" cy="12" r="1.2" /><circle cx="19" cy="12" r="1.2" />',
   pencil: '<path d="M4 20h4L19 9l-4-4L4 16z" />',
   archive: '<rect x="3" y="4" width="18" height="4" rx="1" /><path d="M5 8v11h14V8M10 12h4" />',
+  speaker: '<path d="M11 5L6 9H3v6h3l5 4z" /><path d="M15.5 8.5a5 5 0 0 1 0 7M18.5 5.5a9 9 0 0 1 0 13" />',
+  play: '<path d="M8 5v14l11-7z" />',
 };
 
 let toastTimer;
@@ -389,11 +391,67 @@ function finishTurn() {
           toast("Couldn't copy");
         }
       });
-      actions.append(copy);
+      const listen = el("button");
+      listen.append(svg(ICONS.speaker), "Read aloud");
+      listen.addEventListener("click", () => {
+        if (speech.active) return stopSpeaking();
+        speak(texts.map((n) => n.dataset.raw || n.textContent).join("\n\n"));
+      });
+      actions.append(copy, listen);
       state.turn.append(actions);
+      addMedia(state.turn, texts, state.autoplay);
     }
   }
+  state.autoplay = false;
   state.turn = null;
+}
+
+// ---------- YouTube and links Mina finds: play them right here ----------
+function youtubeId(url) {
+  try {
+    const u = new URL(url);
+    if (/(^|\.)youtu\.be$/.test(u.hostname)) return u.pathname.slice(1, 12) || null;
+    if (/(^|\.)youtube\.com$/.test(u.hostname)) {
+      if (u.pathname === "/watch") return u.searchParams.get("v");
+      const m = u.pathname.match(/^\/(?:shorts|embed|live)\/([\w-]{6,})/);
+      return m ? m[1] : null;
+    }
+  } catch {}
+  return null;
+}
+
+function addMedia(turn, texts, autoplay) {
+  // Read links from the raw text: the markdown render may still be a frame away.
+  const raw = [...state.blocks.values()].filter((b) => turn.contains(b.node)).map((b) => b.text).join("\n");
+  const links = raw.match(/https?:\/\/[^\s)\]>"'<]+/g) || [];
+  const seen = new Set();
+  let first = true;
+  for (const href of links) {
+    const id = youtubeId(href);
+    if (!id || seen.has(id) || seen.size >= 3) continue;
+    seen.add(id);
+    const frame = el("iframe", "yt");
+    frame.src = `https://www.youtube-nocookie.com/embed/${encodeURIComponent(id)}?rel=0&playsinline=1${autoplay && first ? "&autoplay=1" : ""}`;
+    frame.title = "YouTube video";
+    frame.allow = "autoplay; encrypted-media; picture-in-picture; fullscreen";
+    frame.allowFullscreen = true;
+    frame.loading = "lazy";
+    const card = el("div", "media");
+    card.append(frame);
+    turn.insertBefore(card, turn.querySelector(".msg-actions"));
+    first = false;
+  }
+  // A YouTube search link can't be embedded; make it one tap away (and open it when asked by voice).
+  const search = links.find((h) => /youtube\.com\/results/.test(h));
+  if (!seen.size && search) {
+    const open = el("a", "btn media-link");
+    open.href = search;
+    open.target = "_blank";
+    open.rel = "noopener noreferrer";
+    open.append(svg(ICONS.play), "Open on YouTube");
+    turn.insertBefore(open, turn.querySelector(".msg-actions"));
+    if (autoplay) window.open(search, "_blank", "noopener");
+  }
 }
 
 function textBlock(id) {
@@ -672,6 +730,7 @@ async function runStream(url, init) {
       state.streamAbort = null;
       state.busy = false;
       if (state.currentId === sessionId) {
+        state.autoplay = Boolean(ended); // a finished live turn may start the video it found
         finishTurn();
         setStatus(state.pending.size ? "waiting" : null);
         updateComposer();
@@ -680,7 +739,9 @@ async function runStream(url, init) {
     if (ended) {
       markSessionState(sessionId, ended);
       announce(sessionById(sessionId), ended, lastReplyText());
-      if (voice.speakNext && state.currentId === sessionId) speak(lastReplyText());
+      // Don't talk over a video she just started.
+      const reply = lastReplyText();
+      if (voice.speakNext && state.currentId === sessionId && !/youtu\.?be/.test(reply)) speak(reply);
       voice.speakNext = false;
     } else {
       loadSessions({ quiet: true });
@@ -953,6 +1014,10 @@ function setupExtras() {
     renderToggles();
   });
   $("#wake-toggle").addEventListener("click", () => setWake(!voice.wakeEnabled));
+  $("#speaking-stop").addEventListener("click", stopSpeaking);
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && speech.active) stopSpeaking();
+  });
   // Tapping the mic again sends right away instead of waiting for the pause.
   $("#mic").addEventListener("click", () => (voice.mode === "dictate" ? stopDictation(true) : startDictation()));
   $("#mic").hidden = !Recognition;
@@ -1144,7 +1209,7 @@ function finishCommand(text) {
 
 function startDictation() {
   if (!Recognition) return;
-  speechSynthesis.cancel();
+  stopSpeaking();
   voice.mode = "dictate";
   voice.pending = "";
   voice.dictateBase = input.value.trim();
@@ -1211,11 +1276,60 @@ function bestVoice(lang) {
 }
 if ("speechSynthesis" in window) speechSynthesis.onvoiceschanged = () => {};
 
-function speak(markdown) {
-  const text = plainText(markdown).slice(0, 1500);
-  if (!text || !("speechSynthesis" in window)) return;
+// What Mina is saying right now, so it can be stopped from anywhere.
+const speech = { active: false, audio: null, naturalVoice: false };
+
+function setSpeaking(on) {
+  speech.active = on;
+  $("#speaking").hidden = !on;
+  if (!on && voice.wakeEnabled && !voice.rec) {
+    voice.mode = "wake";
+    startRecognition({ continuous: true });
+  }
+}
+
+function stopSpeaking() {
+  if (speech.audio) {
+    speech.audio.pause();
+    URL.revokeObjectURL(speech.audio.src);
+    speech.audio = null;
+  }
+  speech.abort?.abort();
+  if ("speechSynthesis" in window) speechSynthesis.cancel();
+  setSpeaking(false);
+}
+
+async function speak(markdown) {
+  const text = plainText(markdown).slice(0, 3000);
+  if (!text) return;
+  stopSpeaking();
   stopRecognition(); // don't let Mina hear herself
-  speechSynthesis.cancel();
+  setSpeaking(true);
+  if (speech.naturalVoice) {
+    const abort = new AbortController();
+    speech.abort = abort;
+    try {
+      const res = await fetch("/api/tts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text }),
+        signal: abort.signal,
+      });
+      if (!res.ok) throw new Error("tts");
+      const audio = new Audio(URL.createObjectURL(await res.blob()));
+      if (!speech.active) return;
+      speech.audio = audio;
+      audio.onended = audio.onerror = () => {
+        if (speech.audio === audio) stopSpeaking();
+      };
+      await audio.play();
+      return;
+    } catch (err) {
+      if (err.name === "AbortError" || !speech.active) return;
+      // Fall through to the device voice.
+    }
+  }
+  if (!("speechSynthesis" in window)) return setSpeaking(false);
   const lang = navigator.language || "en-US";
   const v = bestVoice(lang);
   // Chrome cuts long utterances off after ~15 seconds, so speak sentence by sentence.
@@ -1226,14 +1340,7 @@ function speak(markdown) {
     u.voice = v;
     u.rate = 1;
     u.pitch = 1.02;
-    if (i === parts.length - 1) {
-      u.onend = u.onerror = () => {
-        if (voice.wakeEnabled && !voice.rec) {
-          voice.mode = "wake";
-          startRecognition({ continuous: true });
-        }
-      };
-    }
+    if (i === parts.length - 1) u.onend = u.onerror = () => speech.active && !speech.audio && setSpeaking(false);
     speechSynthesis.speak(u);
   });
 }
@@ -1255,6 +1362,7 @@ async function boot() {
     return;
   }
   showApp();
+  speech.naturalVoice = Boolean(me.naturalVoice);
   greet();
   updateComposer();
   await loadSessions();

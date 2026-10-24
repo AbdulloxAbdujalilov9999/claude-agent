@@ -54,7 +54,11 @@ app.get("/health", (_req, res) => {
 });
 
 app.get("/api/me", (req, res) => {
-  res.json({ signedIn: isSignedIn(req), configured: Boolean(process.env.MINA_PASSWORD) });
+  res.json({
+    signedIn: isSignedIn(req),
+    configured: Boolean(process.env.MINA_PASSWORD),
+    naturalVoice: Boolean(process.env.OPENAI_API_KEY),
+  });
 });
 app.post("/api/login", login);
 app.post("/api/logout", logout);
@@ -210,6 +214,45 @@ app.post("/api/sessions/:id/messages", async (req, res) => {
     return res.status(400).json({ error: "Body must include a non-empty 'text' string." });
   }
   await streamTurn(req, res, text);
+});
+
+// Mina's natural voice: OpenAI text-to-speech, streamed straight to the browser as MP3.
+// Without OPENAI_API_KEY the app falls back to the device's built-in voices.
+app.post("/api/tts", async (req, res) => {
+  const key = process.env.OPENAI_API_KEY;
+  if (!key) return res.status(501).json({ error: "No natural voice configured." });
+  const text = typeof req.body?.text === "string" ? req.body.text.slice(0, 4000) : "";
+  if (!text.trim()) return res.status(400).json({ error: "Body must include 'text'." });
+  try {
+    const upstream = await fetch("https://api.openai.com/v1/audio/speech", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model: process.env.MINA_TTS_MODEL ?? "gpt-4o-mini-tts",
+        voice: process.env.MINA_TTS_VOICE ?? "nova",
+        input: text,
+        instructions:
+          "You are Mina, a warm, confident chief of staff with a touch of dry wit. Speak naturally and conversationally, at a relaxed but efficient pace, like a trusted colleague.",
+        response_format: "mp3",
+      }),
+    });
+    if (!upstream.ok || !upstream.body) {
+      console.error("TTS failed", upstream.status, await upstream.text().catch(() => ""));
+      return res.status(502).json({ error: "The voice service didn't answer." });
+    }
+    res.writeHead(200, { "Content-Type": "audio/mpeg", "Cache-Control": "no-store" });
+    const reader = upstream.body.getReader();
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      res.write(value);
+    }
+    res.end();
+  } catch (err) {
+    console.error(err);
+    if (!res.headersSent) res.status(502).json({ error: "The voice service didn't answer." });
+    else res.end();
+  }
 });
 
 // For a message sent while Mina is still working: it joins the turn already streaming.
