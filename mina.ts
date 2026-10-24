@@ -1,4 +1,8 @@
 import Anthropic from "@anthropic-ai/sdk";
+import type {
+  BetaManagedAgentsGitHubRepositoryResourceParams,
+  BetaManagedAgentsMemoryStoreResourceParam,
+} from "@anthropic-ai/sdk/resources/beta/sessions";
 
 // User-scoped keys (sk-ant-usr-...) must name a workspace on every request.
 const workspaceId = process.env.ANTHROPIC_WORKSPACE_ID;
@@ -150,28 +154,60 @@ export async function listSessions(): Promise<SessionSummary[]> {
   return page.data.map(toSummary);
 }
 
+type SessionResource = BetaManagedAgentsMemoryStoreResourceParam | BetaManagedAgentsGitHubRepositoryResourceParams;
+
+// Mina's long-term memory, shared by every conversation.
+function memoryResource(): BetaManagedAgentsMemoryStoreResourceParam[] {
+  const id = process.env.MINA_MEMORY_STORE_ID;
+  if (!id) return [];
+  return [
+    {
+      type: "memory_store",
+      memory_store_id: id,
+      access: "read_write",
+      instructions:
+        "Your long-term memory about Abdulloh: his business, people, preferences, decisions, voice and open tasks. Check it at the start of a conversation and whenever context would help. Save durable facts as you learn them. Never store passwords, keys or other secrets.",
+    },
+  ];
+}
+
+// Abdulloh's GitHub projects, cloned into every conversation under /workspace/<repo> so Mina
+// can read the code herself. MINA_REPOS is a comma-separated list of repo names or URLs;
+// MINA_GITHUB_TOKEN is only needed for private repos.
+function repoResources(): BetaManagedAgentsGitHubRepositoryResourceParams[] {
+  const owner = process.env.MINA_GITHUB_OWNER ?? "AbdulloxAbdujalilov9999";
+  const token = process.env.MINA_GITHUB_TOKEN || undefined;
+  return (process.env.MINA_REPOS ?? "")
+    .split(",")
+    .map((r) => r.trim())
+    .filter(Boolean)
+    .map((r) => ({
+      type: "github_repository" as const,
+      url: r.startsWith("https://") ? r : `https://github.com/${r.includes("/") ? r : `${owner}/${r}`}`,
+      ...(token ? { authorization_token: token } : {}),
+    }));
+}
+
 export async function createSession(title?: string): Promise<SessionSummary> {
   const agentId = requireEnv("MINA_AGENT_ID");
   const environmentId = requireEnv("MINA_ENVIRONMENT_ID");
-  const session = await client.beta.sessions.create({
-    agent: { type: "agent", id: agentId },
-    environment_id: environmentId,
-    title: title ?? null,
-    // Mina's long-term memory, shared by every conversation.
-    resources: process.env.MINA_MEMORY_STORE_ID
-      ? [
-          {
-            type: "memory_store",
-            memory_store_id: process.env.MINA_MEMORY_STORE_ID,
-            access: "read_write",
-            instructions:
-              "Your long-term memory about Abdulloh: his business, people, preferences, decisions, voice and open tasks. Check it at the start of a conversation and whenever context would help. Save durable facts as you learn them. Never store passwords, keys or other secrets.",
-          },
-        ]
-      : [],
-    budget: { type: "limit", max_list_cost: { amount: BUDGET_CENTS, currency: "USD" } },
-  });
-  return toSummary(session);
+  const create = (resources: SessionResource[]) =>
+    client.beta.sessions.create({
+      agent: { type: "agent", id: agentId },
+      environment_id: environmentId,
+      title: title ?? null,
+      resources,
+      budget: { type: "limit", max_list_cost: { amount: BUDGET_CENTS, currency: "USD" } },
+    });
+  const repos = repoResources();
+  try {
+    return toSummary(await create([...memoryResource(), ...repos]));
+  } catch (err) {
+    // A renamed or private repo must not stop Abdulloh from chatting; start without the repos.
+    if (!repos.length) throw err;
+    console.error("Couldn't attach repos to the new conversation, starting without them", err);
+    return toSummary(await create(memoryResource()));
+  }
 }
 
 export async function getSession(sessionId: string): Promise<SessionSummary> {
