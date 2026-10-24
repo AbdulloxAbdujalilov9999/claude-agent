@@ -741,7 +741,7 @@ async function runStream(url, init) {
       announce(sessionById(sessionId), ended, lastReplyText());
       // Don't talk over a video she just started.
       const reply = lastReplyText();
-      if (voice.speakNext && state.currentId === sessionId && !/youtu\.?be/.test(reply)) speak(reply);
+      if ((voice.speakNext || autoSpeak()) && state.currentId === sessionId && !/youtu\.?be/.test(reply)) speak(reply);
       voice.speakNext = false;
     } else {
       loadSessions({ quiet: true });
@@ -1015,6 +1015,21 @@ function setupExtras() {
   });
   $("#wake-toggle").addEventListener("click", () => setWake(!voice.wakeEnabled));
   $("#speaking-stop").addEventListener("click", stopSpeaking);
+  $("#auto-speak").addEventListener("click", () => {
+    const on = !autoSpeak();
+    setPref("mina-auto-speak", on ? "on" : "off");
+    renderAutoSpeak();
+    if (on) {
+      // Tapping here also unlocks audio playback for later replies.
+      toast("Mina will read her replies aloud.");
+      const last = lastReplyText() || [...document.querySelectorAll(".row.mina .prose")].map((n) => n.dataset.raw || n.textContent).pop();
+      if (last) speak(last);
+    } else {
+      stopSpeaking();
+      toast("Voice replies off.");
+    }
+  });
+  renderAutoSpeak();
   document.addEventListener("keydown", (e) => {
     if (e.key === "Escape" && speech.active) stopSpeaking();
   });
@@ -1275,6 +1290,18 @@ function bestVoice(lang) {
   return voices.sort((a, b) => rank(a) - rank(b))[0] || null;
 }
 if ("speechSynthesis" in window) speechSynthesis.onvoiceschanged = () => {};
+
+// Speaker button in the top bar: read every reply aloud.
+function autoSpeak() {
+  return pref("mina-auto-speak", "off") === "on";
+}
+function renderAutoSpeak() {
+  const on = autoSpeak();
+  const btn = $("#auto-speak");
+  btn.classList.toggle("on", on);
+  btn.setAttribute("aria-pressed", String(on));
+  btn.title = on ? "Voice replies on" : "Voice replies off";
+}
 
 // What Mina is saying right now, so it can be stopped from anywhere.
 const speech = { active: false, audio: null, naturalVoice: false };
